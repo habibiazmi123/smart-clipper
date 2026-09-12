@@ -62,21 +62,26 @@ export default function Sidebar() {
   };
 
   return (
-    <div style={{ width: 330, background: "#12162a", border: "1px solid #2a2f4a", borderRadius: 10, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <div style={{ display: "flex", borderBottom: "1px solid #2a2f4a" }}>
+    <aside className="side-pane" aria-label="Clip controls">
+      <div className="side-tabs" role="tablist">
         {tabs.map((t) => (
-          <button key={t} className="btn" onClick={() => setSelectedTab(t)}
-            style={{ flex: 1, border: "none", borderRadius: 0, background: "transparent", borderBottom: selectedTab === t ? "2px solid #8b5cf6" : "2px solid transparent", color: selectedTab === t ? "#fff" : "var(--text-dim)" }}>
-            {t === "crop" ? "▦ Crop" : t === "script" ? "T Script" : "✨ Effect"}
+          <button key={t} role="tab" aria-selected={selectedTab === t} className="side-tab" onClick={() => setSelectedTab(t)}>
+            {t === "crop" ? (
+              <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M6 2v14a2 2 0 0 0 2 2h14" /><path d="M18 22V8a2 2 0 0 0-2-2H2" /></svg> Crop</>
+            ) : t === "script" ? (
+              <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg> Script</>
+            ) : (
+              <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M12 3l1.9 5.8H20l-4.9 3.5 1.9 5.7-5-3.6-5 3.6 1.9-5.7L4 8.8h6.1z" /></svg> Effect</>
+            )}
           </button>
         ))}
       </div>
-      <div style={{ padding: 12, flex: 1, overflow: "auto" }}>
+      <div className="side-body">
         {selectedTab === "crop" && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <h3 style={{ fontSize: 12, color: "var(--text-dim)" }}>Segmen dan crop video</h3>
-              <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={reset}>Reset AI</button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <h3 className="lbl">Segments · drag to reframe</h3>
+              <button className="btn sm" onClick={reset}>Reset AI</button>
             </div>
             {(project?.clips || []).map((c: any, i: number) => {
               const val = c.id === clip?.id
@@ -94,12 +99,12 @@ export default function Sidebar() {
               // dot + slider sewarna speaker segmen (= warna rectangle & blok timeline)
               const spkColor = speakerColor(clipSpeakers[c.id], i);
               return (
-                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6, marginBottom: 4, background: active ? spkColor + "22" : "transparent", border: active ? `1px solid ${spkColor}55` : "1px solid transparent" }}>
-                  <span style={{ width: 20, height: 20, borderRadius: "50%", background: spkColor, color: "#fff", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
-                  <input type="range" min={16} max={84} value={Math.round(val * 100)}
+                <div key={c.id} className={`seg-row ${active ? "active" : ""}`}>
+                  <span className="seg-num" style={{ background: spkColor }}>{i + 1}</span>
+                  <input type="range" min={16} max={84} value={Math.round(val * 100)} aria-label={`Reframe segment ${i + 1}`}
                     onChange={(e) => shiftClip(c.id, Number(e.target.value) / 100)}
                     style={{ flex: 1, accentColor: spkColor }} />
-                  <button className="btn" style={{ padding: "2px 7px", fontSize: 11 }} onClick={() => selectClip(c.id, true)} title="Preview">▷</button>
+                  <button className="btn sm icon" style={{ width: 30, height: 30 }} onClick={() => selectClip(c.id, true)} title="Preview" aria-label={`Preview segment ${i + 1}`}>▷</button>
                 </div>
               );
             })}
@@ -108,16 +113,15 @@ export default function Sidebar() {
         )}
         {selectedTab === "script" && (
           <div>
-            <h3 style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 8 }}>Transcript · klik untuk lompat</h3>
+            <h3 className="lbl" style={{ marginBottom: 10 }}>Transcript · click to jump</h3>
             {!clipSegments.length && <p style={{ fontSize: 12, color: "var(--text-dim)" }}>Belum ada transkrip.</p>}
             {clipSegments.map((s) => {
               const active = currentTime >= s.start && currentTime < s.end;
               const v = useEditorStore.getState().videoRef?.current;
               return (
                 <div key={s.id} onClick={() => v && (v.currentTime = s.start + 0.01)}
-                  style={{ padding: "6px 8px", borderRadius: 6, marginBottom: 4, cursor: "pointer", fontSize: 12,
-                    background: active ? "#8b5cf622" : "transparent", border: active ? "1px solid #8b5cf655" : "1px solid transparent" }}>
-                  <div style={{ color: "#8b5cf6", fontSize: 10, fontVariantNumeric: "tabular-nums" }}>{fmtT(s.start)}</div>
+                  className={`script-row ${active ? "active" : ""}`}>
+                  <div className="script-time tabular">{fmtT(s.start)}</div>
                   {editingId === s.id ? (
                     <input autoFocus value={editText} onChange={(e) => setEditText(e.target.value)}
                       onClick={(e) => e.stopPropagation()}
@@ -134,7 +138,7 @@ export default function Sidebar() {
         )}
         {selectedTab === "effect" && (
           <div>
-            <h3 style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 8 }}>Caption style viral</h3>
+            <h3 className="lbl" style={{ marginBottom: 10 }}>Viral caption style</h3>
             <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
               {PRESETS.map((p) => (
                 <button key={p.id} className="btn" onClick={() => setCaptionStyle({ preset: p.id, active: p.active, upcoming: p.upcoming })}
@@ -194,7 +198,7 @@ export default function Sidebar() {
           </div>
         )}
       </div>
-    </div>
+    </aside>
   );
 }
 

@@ -76,30 +76,45 @@ export default function Editor() {
   }, [clip?.id]);
 
   return (
-    <div className="app" style={{ background: "#0b0e1a" }}>
+    <div className="app">
       <div className="top-bar">
-        <button className="btn" onClick={() => navigate("/")}>← Campaign Detail</button>
-        <h1 style={{ fontSize: 13 }}>{project?.name || "Loading..."} <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>/ {project?.status === "ready" ? "🟢 Edited" : project?.status || ""} / {project?.clips?.length || 0} segment</span></h1>
+        <button className="btn ghost sm" onClick={() => navigate("/")} aria-label="Back to projects">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg>
+          Projects
+        </button>
+        <span aria-hidden style={{ width: 1, height: 20, background: "var(--border-strong)" }} />
+        <h1>{project?.name || "Loading..."}</h1>
+        <span className={`status-pill ${project?.status === "ready" ? "ready" : "processing"}`}>
+          <span className="dot" aria-hidden />
+          {project?.status === "ready" ? "Edited" : project?.status === "processing" ? "Processing" : project?.status || "…"}
+        </span>
+        <span className="top-meta tabular">{project?.clips?.length || 0} segments{typeof project?.duration === "number" ? ` · ${Math.round(project.duration)}s` : ""}</span>
         <div style={{ flex: 1 }} />
         {exporting && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 140 }}>
-            <div style={{ flex: 1, height: 6, background: "#151929", borderRadius: 3, overflow: "hidden", border: "1px solid #2a2f4a" }}>
-              <div style={{ height: "100%", width: `${Math.round((exportProgress ?? 0) * 100)}%`, background: "#8b5cf6", transition: "width 0.4s" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 160 }}>
+            <div className="progress-track" role="progressbar" aria-valuenow={Math.round((exportProgress ?? 0) * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Export progress">
+              <div className="progress-fill" style={{ width: `${Math.round((exportProgress ?? 0) * 100)}%` }} />
             </div>
-            <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => cancelCurrentExport()}>Batal</button>
+            <button className="btn sm" onClick={() => cancelCurrentExport()}>Cancel</button>
           </div>
         )}
-        <button className="btn" disabled={!clip || exporting} onClick={() => exportCurrentClipWithProgress(true)}>
-          {exporting ? `Rendering… ${exportProgress != null ? Math.round(exportProgress * 100) + "%" : ""}` : "⭳ Download"}</button>
-        <button className="btn primary">💾 Simpan</button>
+        <button className="btn sm" disabled={!clip || exporting} onClick={() => exportCurrentClipWithProgress(true)}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" x2="12" y1="15" y2="3" /></svg>
+          {exporting ? `Rendering ${exportProgress != null ? Math.round(exportProgress * 100) + "%" : ""}` : "Export"}</button>
+        <button className="btn primary sm">Save</button>
       </div>
-      <div style={{ display: "flex", flex: 1, overflow: "hidden", gap: 12, padding: 12 }}>
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#151929", borderRadius: 10, border: "1px solid #2a2f4a", overflow: "hidden" }}>
-          <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)", display: "flex", justifyContent: "flex-end" }}>
-            <span style={{ background: "#f59e0b33", color: "#fbbf24", padding: "2px 10px", borderRadius: 6, fontWeight: 700 }}>✂ Cut</span>
+      <div className="editor-shell">
+        <div className="preview-pane">
+          <div style={{ padding: "10px 14px 0", display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="status-pill" style={{ fontSize: 11, color: "#fbbf24", borderColor: "rgba(245,158,11,.3)", background: "rgba(245,158,11,.08)" }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><line x1="20" x2="8.12" y1="4" y2="4" /><line x1="14.47" x2="20" y1="14.34" y2="20" /><line x1="14.47" x2="20" y1="9.66" y2="4" /></svg>
+              Cut · 9:16 smart crop
+            </span>
+            <div style={{ flex: 1 }} />
+            {clip && <span className="top-meta tabular" style={{ fontSize: 11 }}>clip {clip.id?.slice(0, 8)}</span>}
           </div>
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 16px", minHeight: 0 }}>
-            <div style={{ position: "relative", width: "100%", maxWidth: 860, aspectRatio: "16/9", background: "#000", borderRadius: 8, overflow: "hidden" }}>
+          <div className="preview-stage">
+            <div className="preview-frame">
               <VideoPlayer videoSrc={`http://127.0.0.1:8719/api/media/${projectId}/video`} videoRef={videoRef} />
               <CropOverlay />
               <CaptionOverlay />

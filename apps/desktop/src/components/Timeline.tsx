@@ -34,18 +34,24 @@ export default function Timeline() {
   const pos = clip ? Math.max(0, Math.min(1, (currentTime - clip.source_start) / Math.max(dur, 0.001))) : 0;
 
   return (
-    <div style={{ padding: "10px 16px 14px", background: "var(--surface)", borderTop: "1px solid var(--border)" }}>
+    <div className="timeline-bar">
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 12, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>◂ {fmt(currentTime)} ▸</span>
+        <span className="tabular" style={{ fontSize: 12, color: "var(--text-dim)", minWidth: 52 }}>{fmt(currentTime)}</span>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-          <button className="btn" style={{ padding: "4px 10px" }} onClick={() => step(-2)}>⏮</button>
-          <button className="btn primary" style={{ padding: "4px 14px" }} onClick={toggle}>⏯</button>
-          <button className="btn" style={{ padding: "4px 10px" }} onClick={() => step(2)}>⏭</button>
+          <button className="btn icon sm" style={{ width: 34, height: 32 }} onClick={() => step(-2)} aria-label="Back 2 seconds">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M11 18V6l-8.5 6L11 18zm.5-6l8.5 6V6l-8.5 6z" /></svg>
+          </button>
+          <button className="btn primary sm" style={{ padding: "6px 18px" }} onClick={toggle} aria-label="Play or pause">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M8 5v14l11-7z" /></svg>
+          </button>
+          <button className="btn icon sm" style={{ width: 34, height: 32 }} onClick={() => step(2)} aria-label="Forward 2 seconds">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M13 6v12l8.5-6L13 6zM4 18l8.5-6L4 6v12z" /></svg>
+          </button>
         </div>
-        {clip && <span style={{ fontSize: 12, color: "var(--success)", fontVariantNumeric: "tabular-nums" }}>{fmt(clip.source_start)} – {fmt(clip.source_end)} · {dur.toFixed(0)}d</span>}
+        {clip && <span className="tabular" style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{fmt(clip.source_start)} – {fmt(clip.source_end)} · {dur.toFixed(0)}s</span>}
       </div>
       {/* duration / segment strip seperti ss.png */}
-      <div style={{ display: "flex", gap: 3, marginTop: 8, height: 34, background: "var(--surface-2)", borderRadius: 6, padding: 3, overflow: "hidden" }}>
+      <div className="seg-strip">
         {(clips.length ? clips : clip ? [{ id: clip.id, start: clip.source_start, end: clip.source_end }] : []).map((c: any, i: number) => {
           const w = Math.max(24, ((c.end - c.start) / Math.max(total, 0.001)) * 100);
           const active = clip?.id === c.id;
@@ -56,12 +62,11 @@ export default function Timeline() {
               key={c.id || i}
               onClick={() => c.id && selectClip(c.id)}
               title={`${fmt(c.start)} - ${fmt(c.end)}${c.id && clipSpeakers[c.id] ? ` · speaker ${clipSpeakers[c.id]}` : ""}`}
+              className="seg-block"
               style={{
-                flex: `${w} 1 0%`, minWidth: 28, borderRadius: 4, cursor: "pointer",
+                flex: `${w} 1 0%`,
                 background: active ? base : base + "55",
                 border: active ? "1px solid #fff3" : "1px solid transparent",
-                color: "#fff", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center",
-                position: "relative", overflow: "hidden",
               }}
             >
               {i + 1}
