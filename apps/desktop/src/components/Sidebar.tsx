@@ -29,14 +29,24 @@ export default function Sidebar() {
     } catch {}
   };
 
-  // slider geser seluruh trajectory clip (clamped 9:16)
+  // slider geser seluruh trajectory clip (clamped 9:16) — dedup per time agar tidak numpuk jitter
   const shiftClip = async (clipId: string, nx: number) => {
     const HALF = 0.158;
     const clamped = Math.max(HALF, Math.min(1 - HALF, nx));
+    const dedupAndShift = (kfs: any[], curAvg: number) => {
+      const d = clamped - curAvg;
+      const shifted = kfs.map((k) => ({ ...k, center_x: Math.max(HALF, Math.min(1 - HALF, k.center_x + d)), source: "manual" }));
+      shifted.sort((a: any, b: any) => a.time - b.time);
+      return shifted.reduce((acc: any[], cur) => {
+        const last = acc[acc.length - 1];
+        if (last && Math.round(last.time * 100) / 100 === Math.round(cur.time * 100) / 100) acc[acc.length - 1] = cur;
+        else acc.push(cur);
+        return acc;
+      }, [] as any[]);
+    };
     if (clip?.id === clipId) {
       const cur = clipAvgX[clipId] ?? 0.5;
-      const d = clamped - cur;
-      const next = keyframes.map((k) => ({ ...k, center_x: Math.max(HALF, Math.min(1 - HALF, k.center_x + d)), source: "manual" }));
+      const next = dedupAndShift(keyframes, cur);
       setKeyframes(next);
       setClipAvgX({ ...clipAvgX, [clipId]: clamped });
       try { await updateKeyframes(clipId, next); } catch {}
@@ -44,8 +54,7 @@ export default function Sidebar() {
       await selectClip(clipId);
       const kfs = useEditorStore.getState().keyframes;
       const avg = kfs.length ? kfs.reduce((s, k: any) => s + k.center_x, 0) / kfs.length : 0.5;
-      const d = clamped - avg;
-      const next = kfs.map((k: any) => ({ ...k, center_x: Math.max(HALF, Math.min(1 - HALF, k.center_x + d)), source: "manual" }));
+      const next = dedupAndShift(kfs, avg);
       setKeyframes(next);
       setClipAvgX({ ...useEditorStore.getState().clipAvgX, [clipId]: clamped });
       try { await updateKeyframes(clipId, next); } catch {}

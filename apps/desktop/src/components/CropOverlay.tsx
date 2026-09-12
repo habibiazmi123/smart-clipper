@@ -79,16 +79,21 @@ export default function CropOverlay() {
 
   const upsert = useCallback((nx: number) => {
     const st = useEditorStore.getState();
-    const kfs = [...st.keyframes].sort((a, b) => a.time - b.time);
-    const t = st.currentTime;
-    const idx = kfs.findIndex((k) => Math.abs(k.time - t) < 0.15);
-    let next;
-    if (idx >= 0) next = kfs.map((k, i) => (i === idx ? { ...k, center_x: nx, source: "manual" } : k));
-    else {
-      next = [...kfs, { time: Math.round(t * 100) / 100, center_x: nx, center_y: 0.5, source: "manual" }].sort((a, b) => a.time - b.time);
-    }
-    st.setKeyframes(next);
-    return next;
+    const t = Math.round(st.currentTime * 100) / 100;
+    const HALF = cropNormW(1280, 720, st.clip?.aspect_ratio || "9:16") / 2;
+    const clamped = Math.max(HALF, Math.min(1 - HALF, nx));
+    let kfs = [...st.keyframes].sort((a, b) => a.time - b.time);
+    const idx = kfs.findIndex((k) => Math.abs(Math.round(k.time * 100) / 100 - t) < 0.08);
+    if (idx >= 0) kfs[idx] = { ...kfs[idx], center_x: clamped, source: "manual" };
+    else kfs.push({ time: t, center_x: clamped, center_y: 0.5, source: "manual" });
+    kfs = kfs.sort((a, b) => a.time - b.time).reduce((acc: any[], cur) => {
+      const last = acc[acc.length - 1];
+      if (last && Math.round(last.time * 100) / 100 === Math.round(cur.time * 100) / 100) acc[acc.length - 1] = cur;
+      else acc.push(cur);
+      return acc;
+    }, []);
+    st.setKeyframes(kfs);
+    return kfs;
   }, []);
 
   const persist = useCallback(async (kfs: any[]) => {
@@ -117,10 +122,30 @@ export default function CropOverlay() {
     window.addEventListener("mouseup", onUp);
   };
 
+  const onStageDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('[data-testid="smart-crop-rect"]')) return;
+    e.preventDefault();
+    drag.current = { startX: e.clientX, baseCx: cx };
+    const onMove = (ev: MouseEvent) => {
+      if (!drag.current || !boxRef.current) return;
+      const rect = boxRef.current.getBoundingClientRect();
+      const dxN = (ev.clientX - drag.current.startX) / rect.width;
+      upsert(Math.max(half, Math.min(1 - half, drag.current.baseCx + dxN)));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      if (drag.current) persist(useEditorStore.getState().keyframes);
+      drag.current = null;
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   if (!clip) return null;
 
   return (
-    <div ref={boxRef} data-testid="smart-crop" style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 8 }}>
+    <div ref={boxRef} data-testid="smart-crop" onMouseDown={onStageDown} style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 8, cursor: "grab" }}>
       {/* dim 4 sisi agar lubang crop jernih */}
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${left}%`, background: "rgba(0,0,0,0.55)" }} />
       <div style={{ position: "absolute", top: 0, bottom: 0, left: `${left + nw * 100}%`, right: 0, background: "rgba(0,0,0,0.55)" }} />
