@@ -11,6 +11,9 @@ export default function Sidebar() {
       const c = await getClip(clipId);
       setClip(c);
       setKeyframes(c.keyframes || []);
+      // seek video to clip start
+      const v = useEditorStore.getState().videoRef?.current;
+      if (v) v.currentTime = c.source_start;
     } catch {}
   };
 

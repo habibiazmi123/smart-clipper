@@ -1,8 +1,7 @@
-import { useRef, useEffect } from "react";
+import { useEffect } from "react";
 import { useEditorStore } from "../stores/editor";
 
-export default function VideoPlayer({ videoSrc }: { videoSrc: string }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+export default function VideoPlayer({ videoSrc, videoRef }: { videoSrc: string; videoRef: { current: HTMLVideoElement | null } }) {
   const { setCurrentTime, setIsPlaying } = useEditorStore();
 
   useEffect(() => {
