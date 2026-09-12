@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { useEditorStore } from "../stores/editor";
-import { updateKeyframes } from "../lib/api";
+import { updateKeyframes, deleteKeyframe } from "../lib/api";
 import { speakerColor } from "../lib/speakers";
 
 // ponytail: linear interp, cukup untuk follow wajah saat play.
@@ -47,11 +47,27 @@ export function cropNormW(vw: number, vh: number, aspect: string) {
 }
 
 export default function CropOverlay() {
-  const { keyframes, currentTime, clip, videoRef } = useEditorStore();
+  const { keyframes, currentTime, clip, videoRef, setKeyframes } = useEditorStore();
   const boxRef = useRef<HTMLDivElement>(null);
   const [vidSize, setVidSize] = useState({ w: 1280, h: 720 });
   const [saving, setSaving] = useState(false);
   const drag = useRef<{ startX: number; baseCx: number } | null>(null);
+
+  const hasManualAtCurrentTime = (() => {
+    const t = Math.round(currentTime * 100) / 100;
+    return keyframes.some((k: any) => Math.abs(Math.round(k.time * 100) / 100 - t) < 0.08 && k.source === "manual");
+  })();
+
+  const handleDeleteKeyframe = async () => {
+    if (!clip?.id) return;
+    const t = Math.round(currentTime * 100) / 100;
+    try {
+      const res = await deleteKeyframe(clip.id, t);
+      setKeyframes(res.keyframes || []);
+    } catch {}
+  };
+
+
 
   useEffect(() => {
     const v = videoRef?.current;
@@ -83,8 +99,14 @@ export default function CropOverlay() {
     const HALF = cropNormW(1280, 720, st.clip?.aspect_ratio || "9:16") / 2;
     const clamped = Math.max(HALF, Math.min(1 - HALF, nx));
     let kfs = [...st.keyframes].sort((a, b) => a.time - b.time);
-    const idx = kfs.findIndex((k) => Math.abs(Math.round(k.time * 100) / 100 - t) < 0.08);
-    if (idx >= 0) kfs[idx] = { ...kfs[idx], center_x: clamped, source: "manual" };
+    // cari keyframe terdekat (bukan first match) dengan threshold lebar
+    // agar drag di antara dua titik mengupdate yang paling dekat, bukan bikin baru
+    let bestIdx = -1, bestDist = 0.35;
+    for (let i = 0; i < kfs.length; i++) {
+      const dist = Math.abs(Math.round(kfs[i].time * 100) / 100 - t);
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    }
+    if (bestIdx >= 0) kfs[bestIdx] = { ...kfs[bestIdx], center_x: clamped, source: "manual" };
     else kfs.push({ time: t, center_x: clamped, center_y: 0.5, source: "manual" });
     kfs = kfs.sort((a, b) => a.time - b.time).reduce((acc: any[], cur) => {
       const last = acc[acc.length - 1];
@@ -162,6 +184,15 @@ export default function CropOverlay() {
           {aspect}{spkNow ? ` · ${spkNow}` : ""}{saving ? " •" : ""}
         </div>
       </div>
+      {hasManualAtCurrentTime && (
+        <button
+          onClick={(e) => { e.stopPropagation(); handleDeleteKeyframe(); }}
+          title="Hapus koreksi di waktu ini (kembalikan ke interpolasi AI)"
+          style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)", zIndex: 6,
+            background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px",
+            fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+        >✕ Hapus keyframe manual</button>
+      )}
     </div>
   );
 }

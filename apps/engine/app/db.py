@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS hook_candidates (
     scores_json TEXT DEFAULT '{}',
     reasons_json TEXT DEFAULT '[]',
     weaknesses_json TEXT DEFAULT '[]',
+    source TEXT DEFAULT 'groq',
+    llm_model TEXT DEFAULT '',
     FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 CREATE TABLE IF NOT EXISTS clips (
@@ -132,7 +134,11 @@ CREATE TABLE IF NOT EXISTS render_jobs (
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     # ponytail: migrasi ringan untuk DB lama (kolom baru nullable)
-    for stmt in ("ALTER TABLE crop_keyframes ADD COLUMN speaker TEXT DEFAULT NULL",):
+    for stmt in (
+        "ALTER TABLE crop_keyframes ADD COLUMN speaker TEXT DEFAULT NULL",
+        "ALTER TABLE hook_candidates ADD COLUMN source TEXT DEFAULT 'groq'",
+        "ALTER TABLE hook_candidates ADD COLUMN llm_model TEXT DEFAULT ''",
+    ):
         try:
             conn.execute(stmt)
         except sqlite3.OperationalError as e:
@@ -233,9 +239,10 @@ def insert_transcript_segments(conn: sqlite3.Connection, transcript_id: str, seg
 def insert_hook_candidate(conn: sqlite3.Connection, **kw) -> object:
     from app.domain.models import HookCandidate
     conn.execute(
-        "INSERT INTO hook_candidates (id,project_id,start,end,score,scores_json,reasons_json,weaknesses_json) VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO hook_candidates (id,project_id,start,end,score,scores_json,reasons_json,weaknesses_json,source,llm_model) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (kw["id"], kw["project_id"], kw["start"], kw["end"], kw["score"],
-         kw.get("scores_json", "{}"), kw.get("reasons_json", "[]"), kw.get("weaknesses_json", "[]")),
+         kw.get("scores_json", "{}"), kw.get("reasons_json", "[]"), kw.get("weaknesses_json", "[]"),
+         kw.get("source", "groq"), kw.get("llm_model", "")),
     )
     conn.commit()
     return HookCandidate(**kw)
@@ -304,10 +311,11 @@ def list_clips_for_project(conn: sqlite3.Connection, project_id: str) -> list:
 
 def list_hooks_for_project(conn: sqlite3.Connection, project_id: str) -> list:
     rows = conn.execute(
-        "SELECT id,project_id,start,end,score,scores_json,reasons_json,weaknesses_json FROM hook_candidates WHERE project_id=? ORDER BY score DESC",
+        "SELECT id,project_id,start,end,score,scores_json,reasons_json,weaknesses_json,source,llm_model FROM hook_candidates WHERE project_id=? ORDER BY score DESC",
         (project_id,),
     ).fetchall()
     from app.domain.models import HookCandidate
     return [HookCandidate(id=r[0], project_id=r[1], start=r[2], end=r[3],
                           score=r[4], scores_json=r[5], reasons_json=r[6],
-                          weaknesses_json=r[7]) for r in rows]
+                          weaknesses_json=r[7], source=r[8] or "groq",
+                          llm_model=r[9] or "") for r in rows]

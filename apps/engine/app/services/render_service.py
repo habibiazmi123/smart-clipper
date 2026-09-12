@@ -1,8 +1,12 @@
 import asyncio
+import logging
 import subprocess
 import json
+import time
 from pathlib import Path
 from app.domain.crop import build_crop_expr, crop_window, aspect_to_wh
+
+log = logging.getLogger(__name__)
 
 
 QUALITY_PRESETS = {
@@ -96,13 +100,18 @@ def render_clip(plan: dict, output_path: str) -> str:
 
 
 def render_clip_with_progress(plan: dict, output_path: str,
-                              on_progress=None, should_cancel=None) -> str:
+                               on_progress=None, should_cancel=None) -> str:
     """Render sambil lapor progress 0..1 via ffmpeg -progress pipe.
 
     on_progress(frac) dipanggil dari thread worker; cukup set atribut
     job (polling GET /jobs aman). should_cancel() -> bool; jika True,
     ffmpeg di-terminate dan asyncio.CancelledError dilempar.
     """
+    log.info("[export] start trim=[%.1f-%.1f] dur=%.1fs quality=%s -> %s",
+             plan["trim"]["start"], plan["trim"]["end"],
+             plan["trim"]["end"] - plan["trim"]["start"],
+             plan["output"].get("quality"), output_path)
+    t0 = time.time()
     args = render_plan_to_ffmpeg_args(plan)
     args.extend(["-progress", "pipe:1", "-nostats", output_path])
     duration = max(plan["trim"]["end"] - plan["trim"]["start"], 0.01)
@@ -123,13 +132,18 @@ def render_clip_with_progress(plan: dict, output_path: str,
                     ms = int(line.split("=", 1)[1] or 0)
                 except ValueError:
                     continue
+                frac = min(max((ms / 1_000_000) / duration, 0.0), 1.0)
+                if int(frac * 100) % 10 == 0:
+                    log.info("[export] %.0f%% (%.1f/%.1fs)", frac * 100, ms / 1_000_000, duration)
                 if on_progress:
-                    on_progress(min(max((ms / 1_000_000) / duration, 0.0), 1.0))
+                    on_progress(frac)
             elif line == "progress=end" and on_progress:
+                log.info("[export] done took=%.1fs -> %s", time.time() - t0, output_path)
                 on_progress(1.0)
         _, stderr = proc.communicate()
         if proc.returncode != 0:
             raise RuntimeError(f"ffmpeg render failed: {(stderr or '')[-500:]}")
+        log.info("[export] done took=%.1fs -> %s", time.time() - t0, output_path)
     finally:
         if proc.poll() is None:
             proc.kill()

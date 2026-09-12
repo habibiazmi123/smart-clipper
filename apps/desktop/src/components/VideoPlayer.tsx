@@ -36,16 +36,37 @@ export default function VideoPlayer({ videoSrc, videoRef }: { videoSrc: string; 
     const v = videoRef.current;
     if (!v) return;
     let raf = 0;
-    // ponytail: rAF saat play agar rectangle smart-crop follow smooth (timeupdate hanya ~4Hz)
     const loop = () => {
+      const cur = useEditorStore.getState().clip;
+      if (cur && v.currentTime >= cur.source_end - 0.12) {
+        v.pause();
+        v.currentTime = cur.source_end;
+        setCurrentTime(v.currentTime);
+        return;
+      }
       setCurrentTime(v.currentTime);
       followSegment();
       if (!v.paused) raf = requestAnimationFrame(loop);
     };
-    const onTime = () => setCurrentTime(v.currentTime);
+    const onTime = () => {
+      const cur = useEditorStore.getState().clip;
+      if (cur && videoRef.current && videoRef.current.currentTime >= cur.source_end - 0.12) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = cur.source_end;
+      }
+      setCurrentTime(v.currentTime);
+    };
     const onPlay = () => { setIsPlaying(true); raf = requestAnimationFrame(loop); };
     const onPause = () => { setIsPlaying(false); cancelAnimationFrame(raf); setCurrentTime(v.currentTime); };
-    const onSeek = () => { setCurrentTime(v.currentTime); followSegment(); };
+    const onSeek = () => {
+      const cur = useEditorStore.getState().clip;
+      const t = v.currentTime;
+      if (cur && (t < cur.source_start - 0.5 || t > cur.source_end + 0.5)) {
+        v.currentTime = cur.source_start;
+      }
+      setCurrentTime(v.currentTime);
+      followSegment();
+    };
     v.addEventListener("timeupdate", onTime);
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);

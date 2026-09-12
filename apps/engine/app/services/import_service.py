@@ -1,7 +1,10 @@
 import json
+import logging
 import subprocess
 import shutil
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 def extract_metadata(video_path: str) -> dict:
@@ -30,28 +33,52 @@ def extract_metadata(video_path: str) -> dict:
     }
 
 
-def download_video(project_id: str, url: str, project_dir: Path) -> Path:
+def download_video(project_id: str, url: str, project_dir: Path, on_progress=None) -> Path:
     import uuid
+    log.info("[download] pid=%s starting url=%s", project_id, url)
     out_dir = project_dir / "source"
     out_dir.mkdir(parents=True, exist_ok=True)
     tmp = out_dir / f"{uuid.uuid4().hex[:12]}.%(ext)s"
     cmd = [
         "yt-dlp",
+        "--newline",
+        "--progress",
         "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "--merge-output-format", "mp4",
         "-o", str(tmp),
         url,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"yt-dlp failed: {result.stderr}")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    last_pct = -1
+    for line in proc.stdout:
+        line = line.strip()
+        if "%" in line and "of" in line:
+            try:
+                pct_str = line.split("%")[0].split()[-1]
+                pct = float(pct_str) / 100.0
+                pct_i = int(pct * 100)
+                if pct_i != last_pct and pct_i % 5 == 0:
+                    log.info("[download] pid=%s %.0f%% %s", project_id, pct * 100, line[:120])
+                    last_pct = pct_i
+                if on_progress:
+                    on_progress(min(max(pct, 0.0), 1.0))
+            except Exception:
+                pass
+        elif line:
+            log.debug("[download] pid=%s %s", project_id, line[:300])
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError(f"yt-dlp failed (code {proc.returncode})")
     for f in out_dir.iterdir():
         if f.suffix == ".mp4":
+            sz = f.stat().st_size / 1024 / 1024
+            log.info("[download] pid=%s done -> %s (%.1f MB)", project_id, f.name, sz)
             return f
     raise FileNotFoundError("No output from yt-dlp")
 
 
 def extract_audio(video_path: str, project_dir: Path) -> Path:
+    log.info("[audio] extracting %s", video_path)
     audio_dir = project_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     out = audio_dir / "audio.wav"
@@ -62,4 +89,5 @@ def extract_audio(video_path: str, project_dir: Path) -> Path:
     )
     if not out.exists():
         raise RuntimeError("Audio extraction failed")
+    log.info("[audio] done -> %s (%.1f MB)", out, out.stat().st_size / 1024 / 1024)
     return out

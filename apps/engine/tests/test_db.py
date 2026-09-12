@@ -24,3 +24,15 @@ def test_project_roundtrip(tmp_data):
     loaded = get_project(conn, "p1")
     assert loaded.name == "My Video"
     conn.close()
+
+
+def test_hook_provenance_columns(tmp_data):
+    from app.db import insert_hook_candidate, list_hooks_for_project
+    conn = sqlite3.connect(str(tmp_data / "test.db"))
+    init_db(conn)
+    insert_hook_candidate(conn, id="h1", project_id="p1", start=1.0, end=5.0,
+                          score=91.0, llm_model="llama-3.3-70b-versatile", source="groq")
+    hooks = list_hooks_for_project(conn, "p1")
+    assert hooks[0].source == "groq"
+    assert hooks[0].llm_model == "llama-3.3-70b-versatile"
+    conn.close()

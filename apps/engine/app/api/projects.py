@@ -1,9 +1,13 @@
 import sqlite3
+import logging
 import uuid
 import asyncio
+import json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.config import settings
+
+log = logging.getLogger(__name__)
 from app.db import (
     init_db, insert_project, get_project, update_project,
     insert_transcript_segments, insert_hook_candidate, insert_clip,
@@ -62,10 +66,22 @@ def get_project_detail(pid: str):
     clips = list_clips_for_project(conn, pid)
     hooks = list_hooks_for_project(conn, pid)
     conn.close()
+    download_mb = 0.0
+    try:
+        pdir2 = settings.DATA_ROOT / "projects" / pid / "source"
+        for f in pdir2.iterdir():
+            if f.suffix == ".part":
+                download_mb = round(f.stat().st_size / 1024 / 1024, 1)
+                break
+    except Exception:
+        pass
     return {
-        "id": p.id, "name": p.name, "status": p.status,
-        "clips": [{"id": c.id, "start": c.source_start, "end": c.source_end} for c in clips],
-        "hooks": [{"id": h.id, "score": h.score, "start": h.start, "end": h.end} for h in hooks],
+        "id": p.id, "name": p.name, "status": p.status, "download_mb": download_mb,
+        "clips": [{"id": c.id, "start": c.source_start, "end": c.source_end, "hook_candidate_id": c.hook_candidate_id or ""} for c in clips],
+        "hooks": [{"id": h.id, "score": h.score, "start": h.start, "end": h.end,
+                   "source": h.source,
+                   "reasons": json.loads(h.reasons_json or "[]"),
+                   "weakness": (json.loads(h.weaknesses_json or "[]") or [""])[0]} for h in hooks],
     }
 
 
@@ -86,15 +102,18 @@ async def analyze_project(pid: str, req: AnalyzeReq):
 
 
 def _do_analysis(pid: str, req: AnalyzeReq):
+    import time
     from app.services.import_service import extract_metadata, download_video, extract_audio
     from app.providers.whisper_provider import transcribe
-    from app.domain.hooks import generate_candidates, score_candidate
+    from app.providers.llm_provider import find_hooks
     from app.db import list_hooks_for_project
     import json
 
+    t_all = time.time()
     conn = _get_conn()
     p = get_project(conn, pid)
     pdir = settings.DATA_ROOT / "projects" / pid
+    log.info("[pipeline] pid=%s start url=%s", pid, p.source_url)
     update_project(conn, pid, status="downloading")
 
     # download/import
@@ -102,6 +121,7 @@ def _do_analysis(pid: str, req: AnalyzeReq):
     video_files = list((pdir / "source").glob("*.mp4"))
     if not video_files:
         if source_url.startswith("http"):
+            log.info("[pipeline] pid=%s stage=download", pid)
             video_path = download_video(pid, source_url, pdir)
         else:
             update_project(conn, pid, status="failed")
@@ -109,106 +129,73 @@ def _do_analysis(pid: str, req: AnalyzeReq):
             return
     else:
         video_path = video_files[0]
+        log.info("[pipeline] pid=%s using existing %s", pid, video_path)
 
+    log.info("[pipeline] pid=%s stage=metadata", pid)
     meta = extract_metadata(str(video_path))
+    log.info("[pipeline] pid=%s meta %.1fs %dx%d fps=%.1f", pid, meta["duration"], meta["width"], meta["height"], meta["fps"])
     update_project(conn, pid, status="transcribing")
 
     # extract audio
+    log.info("[pipeline] pid=%s stage=audio_extract", pid)
     audio_path = extract_audio(str(video_path), pdir)
 
     # transcribe
+    log.info("[pipeline] pid=%s stage=transcribing", pid)
     transcript = transcribe(str(audio_path))
+    conn.execute("DELETE FROM hook_candidates WHERE project_id=?", (pid,))
+    conn.execute("DELETE FROM transcript_segments WHERE transcript_id=?", ("t_" + pid,))
+    conn.commit()
     insert_transcript_segments(conn, "t_" + pid, transcript["segments"])
+    log.info("[pipeline] pid=%s transcript segs=%d", pid, len(transcript["segments"]))
 
-    # hooks
+    # hooks via Groq (or heuristic fallback)
+    log.info("[pipeline] pid=%s stage=looking_hooks n=%d max_dur=%d", pid, req.num_clips, req.max_duration)
     update_project(conn, pid, status="hooking")
-    candidates = generate_candidates(transcript["segments"], meta["duration"])
-    for c in candidates[:20]:  # score top 20
-        score, reasons, weaknesses = score_candidate(c, transcript["segments"])
+    hooks = find_hooks(transcript["segments"], n=req.num_clips, max_duration=req.max_duration)
+    log.info("[pipeline] pid=%s hooks found=%d", pid, len(hooks))
+    for h in hooks:
+        log.info("[pipeline] pid=%s hook %.1f-%.1f dur=%.0fs score=%.0f %s", pid, h["start"], h["end"], h["end"] - h["start"], h["score"], h.get("hook_text", "")[:80])
         insert_hook_candidate(
             conn, id=str(uuid.uuid4())[:10], project_id=pid,
-            start=c["start"], end=c["end"], score=score,
-            scores_json=json.dumps({"final": score}),
-            reasons_json=json.dumps(reasons),
-            weaknesses_json=json.dumps(weaknesses),
+            start=h["start"], end=h["end"], score=h["score"],
+            scores_json=json.dumps({"final": h["score"]}),
+            reasons_json=json.dumps(h.get("reasons", [])),
+            weaknesses_json=json.dumps([h.get("weakness", "")] if h.get("weakness") else []),
+            source=h.get("source", "groq"),
+            llm_model=h.get("llm_model", ""),
         )
 
-    hooks = list_hooks_for_project(conn, pid)
-    top_hooks = hooks[:req.num_clips]
-
-    update_project(conn, pid, status="cropping")
-
-    # face detect + active-speaker crop for each clip
-    from app.providers.face_provider import create_detector
-    from app.services.speaker_service import (
-        analyze_clip_speakers, load_wav_mono, SpeakerTracker)
-    detector = create_detector()
-    # satu tracker untuk semua clip (urut waktu): ID konsisten lintas segmen
-    tracker = SpeakerTracker(sample_interval=settings.FACE_SAMPLE_INTERVAL)
-    try:
-        wav = load_wav_mono(str(audio_path))
-    except Exception:
-        wav = None
-
-    for h in sorted(top_hooks, key=lambda x: x.start):
-        clip_id = uuid.uuid4().hex[:10]
-        insert_clip(conn, id=clip_id, project_id=pid, hook_candidate_id=h.id,
-                    source_start=h.start, source_end=h.end, aspect_ratio=req.aspect_ratio)
-
-        centers = analyze_clip_speakers(
-            str(video_path), detector, h.start, h.end, wav=wav,
-            transcript_segs=transcript["segments"], tracker=tracker)
-
-        from app.services.vision_service import smooth_centers, interpolate_centers
-        if centers:
-            smoothed = smooth_centers(
-                [{"time": c["time"], "cx": c["cx"]} for c in centers])
-            # speaker menempel ke sampel terdekat (tidak diinterpolasi)
-            keyframes = []
-            for kf in interpolate_centers(smoothed):
-                near = min(centers, key=lambda c: abs(c["time"] - kf["time"]))
-                keyframes.append({**kf, "speaker": near.get("speaker"),
-                                  "sconf": near.get("sconf")})
-            # ponytail: keyframes mulai di wajah pertama; tanpa jepit ini FFmpeg
-            # between() = 0 sebelum/sesudahnya -> crop loncat ke tepi. Jepit ke clip.
-            if keyframes[0]["time"] > h.start:
-                first = keyframes[0]
-                keyframes.insert(0, {"time": round(h.start, 3), "cx": first["cx"], "cy": first.get("cy", 0.5),
-                                     "speaker": first.get("speaker"), "sconf": first.get("sconf")})
-            if keyframes[-1]["time"] < h.end:
-                last = keyframes[-1]
-                keyframes.append({"time": round(h.end, 3), "cx": last["cx"], "cy": last.get("cy", 0.5),
-                                  "speaker": last.get("speaker"), "sconf": last.get("sconf")})
-        else:
-            keyframes = [{"time": h.start, "cx": 0.5, "cy": 0.5}]
-
-        from app.domain.crop import centers_to_keyframes
-        crop_kfs = centers_to_keyframes(
-            [{"time": kf["time"], "cx": kf["cx"], "cy": kf.get("cy", 0.5),
-              "speaker": kf.get("speaker")} for kf in keyframes],
-            meta["width"], meta["height"], req.aspect_ratio
-        )
-        insert_crop_keyframes(conn, clip_id, crop_kfs, source="ai")
-
-        # captions
-        clip_segs = [s for s in transcript["segments"]
-                     if s["end"] > h.start and s["start"] < h.end]
-        from app.domain.captions import split_words_to_lines, generate_ass
-        all_words = []
-        for s in clip_segs:
-            words = json.loads(s.get("words_json", "[]"))
-            for w in words:
-                all_words.append(w)
-        lines = split_words_to_lines(all_words, max_chars=30, max_lines=2)
-        ass_content = generate_ass(lines, meta["width"], meta["height"])
-        ass_path = pdir / "exports" / f"{clip_id}.ass"
-        ass_path.write_text(ass_content)
-        insert_caption(conn, clip_id, 0, h.start, h.end,
-                       " ".join(l["text"] for l in lines))
-
-    try:
-        detector.close()
-    except Exception:
-        pass
+    # hook siap -> tandai ready dulu biar UI langsung tampil card
     update_project(conn, pid, status="ready")
+    conn.commit()
+    hook_ids_for_cut = [r[0] for r in conn.execute("SELECT id FROM hook_candidates WHERE project_id=? ORDER BY score DESC", (pid,)).fetchall()]
+    nclips_before = conn.execute("SELECT count(*) FROM clips WHERE project_id=?", (pid,)).fetchone()[0]
+    log.info("[pipeline] pid=%s hook-ready clips_before=%d total=%.1fs — auto-cut di background", pid, nclips_before, time.time() - t_all)
     conn.close()
+
+    if hook_ids_for_cut:
+        def _bg_cut():
+            c2 = _get_conn()
+            try:
+                c2.execute("DELETE FROM clips WHERE project_id=?", (pid,))
+                c2.execute("DELETE FROM crop_keyframes WHERE clip_id IN (SELECT id FROM clips WHERE project_id=?)", (pid,))
+                c2.commit()
+            except Exception:
+                pass
+            from app.api.from_hooks import create_clips_for_hooks
+            try:
+                update_project(c2, pid, status="cropping")
+                create_clips_for_hooks(c2, pid, hook_ids_for_cut, req.aspect_ratio or "9:16")
+            except Exception as e:
+                log.warning("[pipeline] pid=%s bg auto-cut failed: %s", pid, e)
+            finally:
+                try:
+                    nclips = c2.execute("SELECT count(*) FROM clips WHERE project_id=?", (pid,)).fetchone()[0]
+                    update_project(c2, pid, status="ready")
+                    log.info("[pipeline] pid=%s bg cropping done clips=%d", pid, nclips)
+                except Exception:
+                    pass
+                c2.close()
+        import threading
+        threading.Thread(target=_bg_cut, daemon=True).start()

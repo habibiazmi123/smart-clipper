@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { getProject, getClip, getCaptions, scheduleAutoRender, exportCurrentClipWithProgress, cancelCurrentExport } from "../lib/api";
 import { dominantSpeaker } from "../lib/speakers";
 import { useEditorStore } from "../stores/editor";
@@ -11,6 +11,8 @@ import Sidebar from "./Sidebar";
 
 export default function Editor() {
   const { projectId } = useParams();
+  const [searchParams] = useSearchParams();
+  const clipParam = searchParams.get("clip");
   const navigate = useNavigate();
   const { setProject, setClip, setKeyframes, setClipWords, setClipSegments, project, clip, captionStyle, setVideoRef, setClipSpeakers, setClipAvgX, exporting, exportProgress } = useEditorStore();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -49,14 +51,13 @@ export default function Editor() {
 
   useEffect(() => {
     if (!project?.clips?.length) return;
-    getClip(project.clips[0].id).then((c) => {
+    const targetId = clipParam && project.clips.some((c: any) => c.id === clipParam) ? clipParam : project.clips[0].id;
+    getClip(targetId).then((c) => {
       setClip(c);
       setKeyframes(c.keyframes || []);
-      if (videoRef.current) {
-        videoRef.current.currentTime = c.source_start;
-      }
+      if (videoRef.current) videoRef.current.currentTime = c.source_start;
     }).catch(() => {});
-  }, [project]);
+  }, [project, clipParam]);
 
   // gaya caption diubah -> ikut auto-render (debounced; mount pertama skip)
   useEffect(() => {

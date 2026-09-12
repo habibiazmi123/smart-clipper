@@ -1,12 +1,16 @@
+import logging
 import sqlite3
 import uuid
 import json
+import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from app.config import settings
 from app.db import get_clip, update_clip, get_crop_keyframes, delete_manual_crop_keyframes
 from app.services.render_service import OUTPUT_WIDTH, OUTPUT_HEIGHT
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -68,12 +72,30 @@ def update_keyframes(clip_id: str, req: UpdateKeyframesReq):
     if not c:
         conn.close()
         raise HTTPException(404)
-    delete_manual_crop_keyframes(conn, clip_id)
+    conn.execute("DELETE FROM crop_keyframes WHERE clip_id=?", (clip_id,))
+    conn.commit()
     from app.db import insert_crop_keyframes
     insert_crop_keyframes(conn, clip_id, req.keyframes, source="manual")
     update_clip(conn, clip_id, crop_manually_modified=True)
     conn.close()
     return {"status": "updated", "keyframes": len(req.keyframes)}
+
+
+@router.delete("/clips/{clip_id}/keyframes/{kf_time}")
+def delete_keyframe(clip_id: str, kf_time: float):
+    conn = _get_conn()
+    c = get_clip(conn, clip_id)
+    if not c:
+        conn.close()
+        raise HTTPException(404)
+    conn.execute(
+        "DELETE FROM crop_keyframes WHERE clip_id=? AND ABS(time - ?)<0.15",
+        (clip_id, kf_time))
+    conn.commit()
+    from app.db import get_crop_keyframes
+    kfs = get_crop_keyframes(conn, clip_id)
+    conn.close()
+    return {"status": "deleted", "keyframes": kfs}
 
 
 @router.post("/clips/{clip_id}/reset-crop")
@@ -225,12 +247,21 @@ async def _do_export_job(job, clip_id: str, quality: str, style: dict):
                              kfs, meta["width"], meta["height"],
                              c.aspect_ratio or "9:16", str(ass_path), q)
 
+    log.info("[export] job=%s clip=%s quality=%s preparing", job.id, clip_id, q)
+    last_log = 0.0
+
     def _on_progress(frac: float):
+        nonlocal last_log
         job.stage = "encoding"
         job.progress = round(frac, 4)
+        now = time.time()
+        if now - last_log > 2.0 or frac >= 1.0:
+            log.info("[export] job=%s %.0f%%", job.id, frac * 100)
+            last_log = now
 
     await _aio.to_thread(render_clip_with_progress, plan, str(out),
                          _on_progress, lambda: job.cancelled)
+    log.info("[export] job=%s clip=%s done -> %s", job.id, clip_id, out)
     job.stage = "done"
     job.progress = 1.0
 

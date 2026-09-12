@@ -1,5 +1,21 @@
+import os
 from pathlib import Path
 from dataclasses import dataclass, field
+
+def _load_env():
+    vals: dict[str, str] = {}
+    _env = Path(__file__).parent.parent / ".env"
+    if _env.exists():
+        for _line in _env.read_text().splitlines():
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                _k, _v = _k.strip(), _v.strip()
+                vals[_k] = _v
+                os.environ.setdefault(_k, _v)
+    return vals
+
+_ENV = _load_env()
 
 
 @dataclass(frozen=True)
@@ -9,6 +25,9 @@ class Settings:
     FACE_MODEL: str = str(Path(__file__).parent.parent / "assets" / "blaze_face_short_range.tflite")
     LLM_MODEL: str = "llama3.2:latest"
     OLLAMA_URL: str = "http://127.0.0.1:11434"
+    GROQ_API_KEY: str = _ENV.get("GROQ_API_KEY", "")  # type: ignore[name-defined]
+    GROQ_MODEL: str = _ENV.get("GROQ_MODEL", "openai/gpt-oss-120b")  # type: ignore[name-defined]
+    GROQ_URL: str = "https://api.groq.com/openai/v1/chat/completions"
     HOST: str = "127.0.0.1"
     PORT: int = 8719
     CHUNK_SIZE: int = 16000  # whisper expects 16kHz mono

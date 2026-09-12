@@ -10,12 +10,16 @@ Single visible face -> that face, no switching logic.
 Uncertain -> keep current framing (never rapid switching).
 """
 
+import logging
 import wave
+import time
 
 import cv2
 import numpy as np
 
 from app.config import settings
+
+log = logging.getLogger(__name__)
 
 
 def _box_iou(a: dict, b: dict) -> float:
@@ -209,12 +213,14 @@ class SpeakerTracker:
 
 
 def analyze_clip_speakers(video_path: str, detector, start: float, end: float,
-                          wav: tuple | None = None, transcript_segs: list | None = None,
-                          sample_interval: float | None = None,
-                          tracker: "SpeakerTracker | None" = None) -> list[dict]:
+                           wav: tuple | None = None, transcript_segs: list | None = None,
+                           sample_interval: float | None = None,
+                           tracker: "SpeakerTracker | None" = None) -> list[dict]:
     """Per-clip pass. Berbagi satu tracker lintas clip = ID konsisten
     (orang sama = huruf sama) selama framing kontinu. Returns
     [{time, cx, cy, speaker, sconf}]."""
+    log.info("[crop] clip [%.1f-%.1f] analyze start", start, end)
+    t0 = time.time()
     interval = sample_interval or settings.FACE_SAMPLE_INTERVAL
     mouth_dt = settings.SPEAKER_MOUTH_DT
     cap = cv2.VideoCapture(video_path)
@@ -248,4 +254,6 @@ def analyze_clip_speakers(video_path: str, detector, start: float, end: float,
                         "speaker": r["speaker"], "sconf": r["confidence"]})
         t += interval
     cap.release()
+    log.info("[crop] clip [%.1f-%.1f] done samples=%d speakers=%s took=%.1fs",
+             start, end, len(out), sorted(set(x["speaker"] for x in out)), time.time() - t0)
     return out

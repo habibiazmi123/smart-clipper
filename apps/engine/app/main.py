@@ -1,18 +1,22 @@
+import logging
 import sqlite3
 from pathlib import Path
 from fastapi import FastAPI, Request
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.db import init_db
-from app.api import projects, clips, jobs_api
+from app.api import projects, clips, jobs_api, from_hooks
 
 app = FastAPI(title="Smart Clipper Engine")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(projects.router, prefix="/api")
 app.include_router(clips.router, prefix="/api")
 app.include_router(jobs_api.router, prefix="/api")
+app.include_router(from_hooks.router, prefix="/api")
 
 @app.get("/api/health")
 def health():

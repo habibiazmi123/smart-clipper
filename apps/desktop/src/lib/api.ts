@@ -31,6 +31,13 @@ export async function analyzeProject(id: string, numClips = 5, maxDuration = 60,
   });
 }
 
+export async function createClipsFromHooks(pid: string, hookIds: string[], aspectRatio = "9:16") {
+  return fetchJSON(`/projects/${pid}/clips/from-hooks`, {
+    method: "POST",
+    body: JSON.stringify({ hook_ids: hookIds, aspect_ratio: aspectRatio }),
+  });
+}
+
 export async function getClip(id: string) {
   return fetchJSON(`/clips/${id}`);
 }
@@ -46,6 +53,12 @@ export async function updateKeyframes(clipId: string, keyframes: any[]) {
   return fetchJSON(`/clips/${clipId}/keyframes`, {
     method: "POST",
     body: JSON.stringify({ keyframes }),
+  });
+}
+
+export async function deleteKeyframe(clipId: string, kfTime: number) {
+  return fetchJSON<{ keyframes: any[] }>(`/clips/${clipId}/keyframes/${kfTime}`, {
+    method: "DELETE",
   });
 }
 

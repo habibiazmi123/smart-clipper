@@ -1,9 +1,38 @@
+import { useState, useRef, useCallback } from "react";
 import { useEditorStore } from "../stores/editor";
 import { getClip } from "../lib/api";
 import { speakerColor } from "../lib/speakers";
 
+function parseSeekInput(v: string): number | null {
+  v = v.trim();
+  if (!v) return null;
+  if (/^\d+(\.\d+)?$/.test(v)) return Number(v);
+  const parts = v.split(":").map(Number);
+  if (parts.some(isNaN)) return null;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return null;
+}
+
 export default function Timeline() {
   const { clip, project, currentTime, keyframes, videoRef, clipSpeakers } = useEditorStore();
+  const [seekInput, setSeekInput] = useState("");
+  const [seekErr, setSeekErr] = useState(false);
+  const scrubRef = useRef<HTMLDivElement>(null);
+
+  const doSeek = useCallback((t: number) => {
+    const v = videoRef?.current;
+    if (!v) return;
+    const target = clip ? Math.max(clip.source_start, Math.min(clip.source_end, t)) : Math.max(0, t);
+    v.currentTime = target;
+  }, [clip, videoRef]);
+
+  const onScrub = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!clip || !scrubRef.current) return;
+    const rect = scrubRef.current.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    doSeek(clip.source_start + frac * Math.max(clip.source_end - clip.source_start, 0.001));
+  }, [clip, doSeek]);
   const clips = project?.clips || [];
   const hookMap = Object.fromEntries((project?.hooks || []).map((h: any) => [h.id, h]));
   const total = clips.length
@@ -37,7 +66,25 @@ export default function Timeline() {
   return (
     <div className="timeline-bar">
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span className="tabular" style={{ fontSize: 12, color: "var(--text-dim)", minWidth: 52 }}>{fmt(currentTime)}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <input
+            value={seekInput}
+            onChange={(e) => { setSeekInput(e.target.value); setSeekErr(false); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const t = parseSeekInput(seekInput);
+                if (t != null) { doSeek(t); setSeekInput(""); setSeekErr(false); }
+                else setSeekErr(true);
+              }
+            }}
+            placeholder="seek mm:ss"
+            title="Ketik waktu (mm:ss atau detik) lalu Enter"
+            style={{ width: 72, fontSize: 12, background: seekErr ? "#451a03" : "#111320",
+              color: seekErr ? "#fbbf24" : "var(--text-dim)", border: `1px solid ${seekErr ? "#f59e0b" : "#2a2f4a"}`,
+              borderRadius: 4, padding: "4px 6px", outline: "none" }}
+          />
+          <span className="tabular" style={{ fontSize: 12, color: "var(--text-dim)", minWidth: 52 }}>{fmt(currentTime)}</span>
+        </div>
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
           <button className="btn icon sm" style={{ width: 34, height: 32 }} onClick={() => step(-2)} aria-label="Back 2 seconds">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M11 18V6l-8.5 6L11 18zm.5-6l8.5 6V6l-8.5 6z" /></svg>
@@ -72,13 +119,35 @@ export default function Timeline() {
               }}
             >
               {hook ? `${i + 1} · ${Math.round(hook.score)}` : i + 1}
-              {active && (
-                <div style={{ position: "absolute", top: 0, bottom: 0, left: `${pos * 100}%`, width: 2, background: "#fff" }} />
-              )}
             </div>
           );
         })}
       </div>
+      {/* scrub bar: drag/click untuk seek */}
+      {clip && (
+        <div ref={scrubRef} onClick={onScrub}
+          style={{ position: "relative", height: 18, marginTop: 6, background: "#111320", borderRadius: 4, cursor: "pointer", border: "1px solid #2a2f4a" }}>
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: `${pos * 100}%`, width: 2, background: "#fff", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${pos * 100}%`, background: "rgba(139,92,246,0.25)", borderRadius: 4, pointerEvents: "none" }} />
+          <div
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const onMove = (ev: MouseEvent) => {
+                if (!scrubRef.current || !clip) return;
+                const rect = scrubRef.current.getBoundingClientRect();
+                const frac = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+                doSeek(clip.source_start + frac * Math.max(clip.source_end - clip.source_start, 0.001));
+              };
+              const onUp = () => {
+                window.removeEventListener("mousemove", onMove);
+                window.removeEventListener("mouseup", onUp);
+              };
+              window.addEventListener("mousemove", onMove);
+              window.addEventListener("mouseup", onUp);
+            }}
+            style={{ position: "absolute", top: "50%", left: `${pos * 100}%`, width: 14, height: 14, borderRadius: "50%", background: "#fff", border: "2px solid #8b5cf6", transform: "translate(-50%, -50%)", cursor: "grab" }} />
+        </div>
+      )}
       {/* keyframe dots untuk clip aktif, max ~40 titik; tick putih = ganti speaker */}
       {clip && (() => {
         const step = Math.max(1, Math.ceil(keyframes.length / 40));

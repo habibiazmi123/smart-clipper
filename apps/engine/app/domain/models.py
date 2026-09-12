@@ -60,6 +60,8 @@ class HookCandidate:
     scores_json: str = "{}"
     reasons_json: str = "[]"
     weaknesses_json: str = "[]"
+    source: str = "groq"
+    llm_model: str = ""
 
 
 @dataclass
