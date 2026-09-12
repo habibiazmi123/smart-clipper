@@ -3,7 +3,7 @@ import { useEditorStore } from "../stores/editor";
 import { updateKeyframes } from "../lib/api";
 
 // ponytail: linear interp, cukup untuk follow wajah saat play
-function interpolateKeyframes(kfs: any[], t: number) {
+export function interpolateKeyframes(kfs: any[], t: number) {
   if (!kfs.length) return { cx: 0.5, cy: 0.5 };
   const sorted = [...kfs].sort((a, b) => a.time - b.time);
   if (t <= sorted[0].time) return { cx: sorted[0].center_x, cy: sorted[0].center_y };
@@ -29,7 +29,7 @@ function speakerAt(kfs: any[], t: number): string | null {
   return spk;
 }
 
-function cropNormW(vw: number, vh: number, aspect: string) {
+export function cropNormW(vw: number, vh: number, aspect: string) {
   const [aw, ah] = aspect.split(":").map(Number);
   if (!vw || !vh || !aw || !ah) return 606 / 1920; // fallback 9:16 @1080p
   const target = aw / ah, src = vw / vh;

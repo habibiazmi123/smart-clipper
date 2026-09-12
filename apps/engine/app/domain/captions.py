@@ -74,3 +74,60 @@ def _fmt_time(seconds: float) -> str:
     m = int((seconds % 3600) // 60)
     s = seconds % 60
     return f"{h}:{m:02d}:{s:05.2f}"
+
+
+# ponytail: warna ASS &HAABBGGRR; karaoke \k mengisi Primary saat dinyanyikan
+VIRAL_PRESETS = {
+    "hormozi": {"font_name": "Arial", "font_size": 64, "bold": True,
+                "primary": "&H0000FFFF", "secondary": "&H00FFFFFF",
+                "outline": "&H00000000", "outline_w": 3},
+    "beast": {"font_name": "Arial", "font_size": 72, "bold": True,
+              "primary": "&H00FFFFFF", "secondary": "&H0000FFFF",
+              "outline": "&H00000000", "outline_w": 3},
+    "minimal": {"font_name": "Arial", "font_size": 52, "bold": False,
+                "primary": "&H00FFFFFF", "secondary": "&H99FFFFFF",
+                "outline": "&H00000000", "outline_w": 2},
+}
+
+
+def generate_karaoke_ass(words: list[dict], width: int = 1920, height: int = 1080,
+                         style: dict = None, max_words: int = 8,
+                         max_dur: float = 3.0) -> str:
+    """Word-by-word highlighted ASS (viral style). words: [{w,start,end}]."""
+    style = {"alignment": 2, "margin_bottom": 140, **VIRAL_PRESETS["hormozi"], **(style or {})}
+    align = int(style.get("alignment", 2))
+    header = f"""[Script Info]
+ScriptType: v4.00+
+WrapStyle: 0
+PlayResX: {width}
+PlayResY: {height}
+ScalerBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{style['font_name']},{style['font_size']},{style['primary']},{style['secondary']},{style['outline']},&H80000000,{-1 if style.get('bold', True) else 0},0,0,0,100,100,0,0,1,{style['outline_w']},1,{align},20,20,{style['margin_bottom']},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    events = []
+    group: list[dict] = []
+
+    def flush():
+        if not group:
+            return
+        parts = []
+        for w in group:
+            cs = max(1, int(round((w["end"] - w["start"]) * 100)))
+            safe = w["w"].replace("{", "(").replace("}", ")")
+            parts.append(f"{{\\k{cs}}}{safe} ")
+        text = "".join(parts).rstrip().replace("\n", "")
+        events.append(f"Dialogue: 0,{_fmt_time(group[0]['start'])},{_fmt_time(group[-1]['end'])},Default,,0,0,0,,{text}")
+        group.clear()
+
+    for w in words:
+        if group and (len(group) >= max_words or w["start"] - group[0]["start"] > max_dur):
+            flush()
+        group.append(w)
+    flush()
+    return header + "\n".join(events) + "\n"

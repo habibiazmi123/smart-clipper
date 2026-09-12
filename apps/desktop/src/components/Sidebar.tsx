@@ -1,12 +1,22 @@
 import { useEffect, useState } from "react";
 import { useEditorStore } from "../stores/editor";
-import { getClip, updateKeyframes, resetCropToAI } from "../lib/api";
+import { getClip, updateKeyframes, resetCropToAI, editSegment, refreshClipCaptions, renderCurrentClip, scheduleAutoRender } from "../lib/api";
 
 const DOT = ["#6366f1", "#22c55e", "#f59e0b", "#a855f7", "#ec4899", "#06b6d4"];
 
+const PRESETS = [
+  { id: "hormozi", label: "Hormozi", active: "#FFFF00", upcoming: "#FFFFFF" },
+  { id: "beast", label: "Beast", active: "#FFFFFF", upcoming: "#FFFF00" },
+  { id: "minimal", label: "Minimal", active: "#FFFFFF", upcoming: "#CCCCCC" },
+] as const;
+
 export default function Sidebar() {
-  const { selectedTab, setSelectedTab, keyframes, clip, project, setClip, setKeyframes, currentTime } = useEditorStore();
+  const { selectedTab, setSelectedTab, keyframes, clip, project, setClip, setKeyframes, currentTime,
+    clipSegments, captionStyle, setCaptionStyle, exporting, autoRender, setAutoRender, renderResults } = useEditorStore();
+  const renderRes = clip ? renderResults[clip.id] : undefined;
   const [avgs, setAvgs] = useState<Record<string, number>>({});
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
 
   const tabs = ["crop", "script", "effect"] as const;
 
@@ -115,18 +125,86 @@ export default function Sidebar() {
         )}
         {selectedTab === "script" && (
           <div>
-            <h3 style={{ fontSize: 14, marginBottom: 8 }}>Script</h3>
-            <p style={{ fontSize: 12, color: "var(--text-dim)" }}>{clip?.caption_short || "No captions yet"}</p>
+            <h3 style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 8 }}>Transcript · klik untuk lompat</h3>
+            {!clipSegments.length && <p style={{ fontSize: 12, color: "var(--text-dim)" }}>Belum ada transkrip.</p>}
+            {clipSegments.map((s) => {
+              const active = currentTime >= s.start && currentTime < s.end;
+              const v = useEditorStore.getState().videoRef?.current;
+              return (
+                <div key={s.id} onClick={() => v && (v.currentTime = s.start + 0.01)}
+                  style={{ padding: "6px 8px", borderRadius: 6, marginBottom: 4, cursor: "pointer", fontSize: 12,
+                    background: active ? "#8b5cf622" : "transparent", border: active ? "1px solid #8b5cf655" : "1px solid transparent" }}>
+                  <div style={{ color: "#8b5cf6", fontSize: 10, fontVariantNumeric: "tabular-nums" }}>{fmtT(s.start)}</div>
+                  {editingId === s.id ? (
+                    <input autoFocus value={editText} onChange={(e) => setEditText(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onBlur={async () => { setEditingId(null); if (editText.trim() && editText !== s.text && clip) { await editSegment(s.id, editText.trim()).catch(() => {}); await refreshClipCaptions(clip.id).catch(() => {}); scheduleAutoRender(); } }}
+                      onKeyDown={async (e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditingId(null); }}
+                      style={{ width: "100%", background: "#000", color: "#fff", border: "1px solid #8b5cf6", borderRadius: 4, fontSize: 12, padding: 4 }} />
+                  ) : (
+                    <div onDoubleClick={(e) => { e.stopPropagation(); setEditingId(s.id); setEditText(s.text); }} title="Double-click untuk edit">{s.text}</div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
         {selectedTab === "effect" && (
           <div>
-            <h3 style={{ fontSize: 14, marginBottom: 8 }}>Effects</h3>
-            <p style={{ fontSize: 12, color: "var(--text-dim)" }}>Caption styling coming soon</p>
+            <h3 style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 8 }}>Caption style viral</h3>
+            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+              {PRESETS.map((p) => (
+                <button key={p.id} className="btn" onClick={() => setCaptionStyle({ preset: p.id, active: p.active, upcoming: p.upcoming })}
+                  style={{ flex: 1, fontSize: 11, padding: "6px 4px", borderColor: captionStyle.preset === p.id ? "#8b5cf6" : undefined, background: captionStyle.preset === p.id ? "#8b5cf633" : undefined }}>{p.label}</button>
+              ))}
+            </div>
+            <label style={{ fontSize: 11, color: "var(--text-dim)" }}>Ukuran font ({captionStyle.fontSize})</label>
+            <input type="range" min={40} max={110} value={captionStyle.fontSize} onChange={(e) => setCaptionStyle({ fontSize: Number(e.target.value) })} style={{ width: "100%", accentColor: "#8b5cf6", marginBottom: 8 }} />
+            <label style={{ fontSize: 11, color: "var(--text-dim)" }}>Posisi</label>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              {(["top", "middle", "bottom"] as const).map((p) => (
+                <button key={p} className="btn" onClick={() => setCaptionStyle({ position: p })}
+                  style={{ flex: 1, fontSize: 11, padding: "4px", borderColor: captionStyle.position === p ? "#8b5cf6" : undefined }}>{p}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 12, marginBottom: 8, fontSize: 11 }}>
+              <label style={{ display: "flex", gap: 4, alignItems: "center" }}>Aktif <input type="color" value={captionStyle.active} onChange={(e) => setCaptionStyle({ active: e.target.value })} /></label>
+              <label style={{ display: "flex", gap: 4, alignItems: "center" }}>Lainnya <input type="color" value={captionStyle.upcoming} onChange={(e) => setCaptionStyle({ upcoming: e.target.value })} /></label>
+              <label style={{ display: "flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={captionStyle.stroke} onChange={(e) => setCaptionStyle({ stroke: e.target.checked })} /> Outline</label>
+            </div>
+            <button className="btn primary" disabled={!clip || exporting} onClick={async () => {
+              const ok = await renderCurrentClip();
+              const st = useEditorStore.getState();
+              const res = clip ? st.renderResults[clip.id] : undefined;
+              if (ok && res && clip) {
+                const a = document.createElement("a");
+                a.href = res.url;
+                a.download = `${clip.id}_9x16.mp4`;
+                a.click();
+              }
+            }} style={{ width: "100%", marginBottom: 8 }}>{exporting ? "Rendering…" : "⭳ Export 9:16 + caption"}</button>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, marginBottom: 6 }}>
+              <input type="checkbox" checked={autoRender} onChange={(e) => setAutoRender(e.target.checked)} />
+              Auto-render setiap edit teks/gaya
+            </label>
+            {renderRes ? (
+              <a href={renderRes.url} download={`${clip?.id}_9x16.mp4`} style={{ fontSize: 12, color: "#22c55e" }}>
+                ✓ Render terbaru siap · {renderRes.time} — klik untuk download
+              </a>
+            ) : exporting ? (
+              <p style={{ fontSize: 12, color: "#f59e0b" }}>Rendering… hasil otomatis muncul di sini.</p>
+            ) : (
+              <p style={{ fontSize: 11, color: "var(--text-dim)" }}>Edit teks/gaya → mp4 fresh ter-render otomatis.</p>
+            )}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function fmtT(s: number): string {
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
