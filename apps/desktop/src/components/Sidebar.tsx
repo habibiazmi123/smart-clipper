@@ -16,7 +16,7 @@ export default function Sidebar() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
 
-  const tabs = ["crop", "script", "effect"] as const;
+  const tabs = ["crop", "script", "effect", "hook"] as const;
 
   const selectClip = async (clipId: string, autoplay = false) => {
     try {
@@ -70,6 +70,8 @@ export default function Sidebar() {
               <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M6 2v14a2 2 0 0 0 2 2h14" /><path d="M18 22V8a2 2 0 0 0-2-2H2" /></svg> Crop</>
             ) : t === "script" ? (
               <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg> Script</>
+            ) : t === "hook" ? (
+              <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M8 5v14l11-7z" /><circle cx="15" cy="8" r="2" /></svg> Hook</>
             ) : (
               <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M12 3l1.9 5.8H20l-4.9 3.5 1.9 5.7-5-3.6-5 3.6 1.9-5.7L4 8.8h6.1z" /></svg> Effect</>
             )}
@@ -136,6 +138,9 @@ export default function Sidebar() {
             })}
           </div>
         )}
+        {selectedTab === "hook" && (
+          <HookTab />
+        )}
         {selectedTab === "effect" && (
           <div>
             <h3 className="lbl" style={{ marginBottom: 10 }}>Viral caption style</h3>
@@ -199,6 +204,33 @@ export default function Sidebar() {
         )}
       </div>
     </aside>
+  );
+}
+
+function HookTab() {
+  const { project, videoRef } = useEditorStore();
+  const hooks: any[] = [...(project?.hooks || [])].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  if (!hooks.length) return <p style={{ fontSize: 12, color: "var(--text-dim)" }}>Belum ada hook — tunggu analyze selesai.</p>;
+  return (
+    <div>
+      <h3 className="lbl" style={{ marginBottom: 10 }}>Viral hook · {hooks.length}</h3>
+      {hooks.map((h: any, i: number) => {
+        const sc = Math.round(h.score ?? 0);
+        const col = sc >= 80 ? "#22c55e" : sc >= 50 ? "#f59e0b" : "#9ca3af";
+        return (
+          <div key={h.id} onClick={() => { const v = videoRef?.current; if (v) { v.currentTime = Number(h.start); v.play().catch(() => {}); } }}
+            style={{ padding: 10, borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface-2)", marginBottom: 8, cursor: "pointer" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: "var(--text-dim)" }}>#{i + 1} · {fmtT(Number(h.start))} → {fmtT(Number(h.end))} · {(Number(h.end) - Number(h.start)).toFixed(0)}s</span>
+              <span style={{ fontSize: 16, fontWeight: 800, color: col }}>{sc}</span>
+            </div>
+            {h.reasons?.length ? <ul style={{ margin: "6px 0 0", paddingLeft: 14, fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>{h.reasons.slice(0, 3).map((r: string, j: number) => <li key={j}>{r}</li>)}</ul> : null}
+            {h.weakness ? <p style={{ fontSize: 11, color: "var(--text-faint)", fontStyle: "italic", marginTop: 4 }}>⚠ {h.weakness}</p> : null}
+            {h.source ? <span style={{ fontSize: 10, color: "var(--text-faint)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 6px" }}>{h.source}</span> : null}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

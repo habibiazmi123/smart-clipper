@@ -32,7 +32,7 @@ interface EditorState {
   keyframes: Keyframe[];
   currentTime: number;
   isPlaying: boolean;
-  selectedTab: "crop" | "script" | "effect";
+  selectedTab: "crop" | "script" | "effect" | "hook";
   videoRef: { current: HTMLVideoElement | null } | null;
   // true = klik user (lompat ke awal segmen), false = auto-follow saat play (jangan seek)
   seekOnSelect: boolean;
@@ -52,7 +52,7 @@ interface EditorState {
   setKeyframes: (k: Keyframe[]) => void;
   setCurrentTime: (t: number) => void;
   setIsPlaying: (p: boolean) => void;
-  setSelectedTab: (t: "crop" | "script" | "effect") => void;
+  setSelectedTab: (t: "crop" | "script" | "effect" | "hook") => void;
   setVideoRef: (r: { current: HTMLVideoElement | null }) => void;
   setSeekOnSelect: (v: boolean) => void;
   setClipWords: (w: EditorState["clipWords"]) => void;

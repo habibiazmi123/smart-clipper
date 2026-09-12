@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { listProjects, createProject } from "../lib/api";
+import { listProjects, createProject, analyzeProject } from "../lib/api";
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<any[]>([]);
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
+  const [numClips, setNumClips] = useState(3);
+  const [maxDuration, setMaxDuration] = useState(60);
+  const [aspectRatio, setAspectRatio] = useState("9:16");
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
 
@@ -18,6 +21,7 @@ export default function Dashboard() {
     setBusy(true);
     try {
       const p = await createProject(name || "Untitled", url);
+      analyzeProject(p.id, numClips, maxDuration, aspectRatio);
       navigate(`/editor/${p.id}`);
     } finally {
       setBusy(false);
@@ -77,6 +81,26 @@ export default function Dashboard() {
                   )}
                 </button>
               </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                  <span style={{ color: "var(--text-dim)" }}>Clips</span>
+                  <select className="field" value={numClips} onChange={(e) => setNumClips(Number(e.target.value))}>
+                    {[3, 5, 10, 15].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                  <span style={{ color: "var(--text-dim)" }}>Max duration</span>
+                  <select className="field" value={maxDuration} onChange={(e) => setMaxDuration(Number(e.target.value))}>
+                    {[30, 45, 60, 90].map((n) => <option key={n} value={n}>{n}s</option>)}
+                  </select>
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                  <span style={{ color: "var(--text-dim)" }}>Ratio</span>
+                  <select className="field" value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)}>
+                    {["9:16", "1:1", "16:9"].map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </label>
+              </div>
               <p style={{ fontSize: 11.5, color: "var(--text-faint)" }}>Supports YouTube · MP4 · MOV · MKV · WebM via yt-dlp + FFmpeg</p>
             </div>
           </div>
@@ -97,9 +121,9 @@ export default function Dashboard() {
                 onKeyDown={(e) => e.key === "Enter" && navigate(`/editor/${p.id}`)} aria-label={`Open ${p.name}`}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
                   <h3 style={{ fontSize: 14, fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</h3>
-                  <span className={`status-pill ${p.status === "ready" ? "ready" : "processing"}`}>
-                    <span className="dot" aria-hidden />{p.status}
-                  </span>
+          <span className={`status-pill ${p.status === "ready" ? "ready" : "processing"}`}>
+            <span className="dot" aria-hidden />{p.status === "cropping" ? "Potong clip…" : p.status}
+          </span>
                 </div>
                 <p style={{ fontSize: 11.5, color: "var(--text-faint)", fontFamily: "ui-monospace,monospace", overflow: "hidden", textOverflow: "ellipsis" }}>{p.id}</p>
               </article>

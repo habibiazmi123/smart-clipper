@@ -5,6 +5,7 @@ import { speakerColor } from "../lib/speakers";
 export default function Timeline() {
   const { clip, project, currentTime, keyframes, videoRef, clipSpeakers } = useEditorStore();
   const clips = project?.clips || [];
+  const hookMap = Object.fromEntries((project?.hooks || []).map((h: any) => [h.id, h]));
   const total = clips.length
     ? clips[clips.length - 1].end - clips[0].start
     : clip ? clip.source_end - clip.source_start : 1;
@@ -57,11 +58,12 @@ export default function Timeline() {
           const active = clip?.id === c.id;
           // blok sewarna speaker dominan segmen (= warna rectangle & dot sidebar)
           const base = speakerColor(c.id ? clipSpeakers[c.id] : null, i);
+          const hook = c.hook_candidate_id ? hookMap[c.hook_candidate_id] : null;
           return (
             <div
               key={c.id || i}
               onClick={() => c.id && selectClip(c.id)}
-              title={`${fmt(c.start)} - ${fmt(c.end)}${c.id && clipSpeakers[c.id] ? ` · speaker ${clipSpeakers[c.id]}` : ""}`}
+              title={`${fmt(c.start)} - ${fmt(c.end)}${hook ? ` · score ${Math.round(hook.score)}` : ""}${c.id && clipSpeakers[c.id] ? ` · speaker ${clipSpeakers[c.id]}` : ""}${hook?.reasons?.[0] ? ` · ${hook.reasons[0]}` : ""}`}
               className="seg-block"
               style={{
                 flex: `${w} 1 0%`,
@@ -69,7 +71,7 @@ export default function Timeline() {
                 border: active ? "1px solid #fff3" : "1px solid transparent",
               }}
             >
-              {i + 1}
+              {hook ? `${i + 1} · ${Math.round(hook.score)}` : i + 1}
               {active && (
                 <div style={{ position: "absolute", top: 0, bottom: 0, left: `${pos * 100}%`, width: 2, background: "#fff" }} />
               )}
