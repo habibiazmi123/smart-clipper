@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getProject, getClip, getCaptions, scheduleAutoRender } from "../lib/api";
+import { getProject, getClip, getCaptions, scheduleAutoRender, exportCurrentClipWithProgress, cancelCurrentExport } from "../lib/api";
 import { dominantSpeaker } from "../lib/speakers";
 import { useEditorStore } from "../stores/editor";
 import VideoPlayer from "./VideoPlayer";
@@ -12,7 +12,7 @@ import Sidebar from "./Sidebar";
 export default function Editor() {
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const { setProject, setClip, setKeyframes, setClipWords, setClipSegments, project, clip, captionStyle, setVideoRef, setClipSpeakers, setClipAvgX } = useEditorStore();
+  const { setProject, setClip, setKeyframes, setClipWords, setClipSegments, project, clip, captionStyle, setVideoRef, setClipSpeakers, setClipAvgX, exporting, exportProgress } = useEditorStore();
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastStyleKey = useRef<string | null>(null);
 
@@ -81,7 +81,16 @@ export default function Editor() {
         <button className="btn" onClick={() => navigate("/")}>← Campaign Detail</button>
         <h1 style={{ fontSize: 13 }}>{project?.name || "Loading..."} <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>/ {project?.status === "ready" ? "🟢 Edited" : project?.status || ""} / {project?.clips?.length || 0} segment</span></h1>
         <div style={{ flex: 1 }} />
-        <button className="btn">⭳ Download</button>
+        {exporting && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 140 }}>
+            <div style={{ flex: 1, height: 6, background: "#151929", borderRadius: 3, overflow: "hidden", border: "1px solid #2a2f4a" }}>
+              <div style={{ height: "100%", width: `${Math.round((exportProgress ?? 0) * 100)}%`, background: "#8b5cf6", transition: "width 0.4s" }} />
+            </div>
+            <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => cancelCurrentExport()}>Batal</button>
+          </div>
+        )}
+        <button className="btn" disabled={!clip || exporting} onClick={() => exportCurrentClipWithProgress(true)}>
+          {exporting ? `Rendering… ${exportProgress != null ? Math.round(exportProgress * 100) + "%" : ""}` : "⭳ Download"}</button>
         <button className="btn primary">💾 Simpan</button>
       </div>
       <div style={{ display: "flex", flex: 1, overflow: "hidden", gap: 12, padding: 12 }}>

@@ -3,14 +3,21 @@ import { useEditorStore } from "../stores/editor";
 import { updateKeyframes } from "../lib/api";
 import { speakerColor } from "../lib/speakers";
 
-// ponytail: linear interp, cukup untuk follow wajah saat play
+// ponytail: linear interp, cukup untuk follow wajah saat play.
+// Ganti orang = CUT (tahan posisi lama sampai batas keyframe), glide
+// hanya untuk gerakan orang yang sama. Mirror build_crop_expr backend.
+function isSwitch(a: any, b: any): boolean {
+  return !!(a?.speaker && b?.speaker && a.speaker !== b.speaker);
+}
+
 export function interpolateKeyframes(kfs: any[], t: number) {
   if (!kfs.length) return { cx: 0.5, cy: 0.5 };
   const sorted = [...kfs].sort((a, b) => a.time - b.time);
-  if (t <= sorted[0].time) return { cx: sorted[0].center_x, cy: sorted[0].center_y };
+  if (t < sorted[0].time) return { cx: sorted[0].center_x, cy: sorted[0].center_y };
   for (let i = 1; i < sorted.length; i++) {
-    if (t <= sorted[i].time) {
+    if (t < sorted[i].time) {
       const p = sorted[i - 1], c = sorted[i];
+      if (isSwitch(p, c)) return { cx: p.center_x, cy: p.center_y };
       const span = Math.max(c.time - p.time, 0.001);
       const f = (t - p.time) / span;
       return { cx: p.center_x + f * (c.center_x - p.center_x), cy: p.center_y + f * (c.center_y - p.center_y) };

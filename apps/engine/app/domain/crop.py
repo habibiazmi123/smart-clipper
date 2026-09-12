@@ -47,7 +47,13 @@ def centers_to_keyframes(centers: list[dict], src_w: int, src_h: int, aspect: st
 
 
 def build_crop_expr(keyframes: list[dict], src_w: int, src_h: int, aspect_w: int, aspect_h: int) -> str:
-    """Build ffmpeg crop x/y expression from keyframes."""
+    """Build ffmpeg crop x/y expression from keyframes.
+
+    Window half-open [Ti,Ti+1) + head/tail hold, sehingga nilainya
+    PERSIS sama dengan interpolateKeyframes() di preview untuk semua t:
+    sebelumnya suku interpolasi tidak ter-gate between() (operator `+`
+    di luar kurung) -> x meledak lalu di-clamp ffmpeg ke area yang salah.
+    """
     w = crop_window(src_w, src_h, aspect_w, aspect_h)
     crop_w = w["crop_w"]
     crop_h = w["crop_h"]
@@ -56,24 +62,40 @@ def build_crop_expr(keyframes: list[dict], src_w: int, src_h: int, aspect_w: int
         cx, _ = clamp_center(kf["center_x"], kf["center_y"], crop_w, crop_h, src_w, src_h)
         return round(cx * src_w - crop_w / 2, 2)
 
+    if not keyframes:
+        return f"crop={crop_w}:{crop_h}:{(src_w - crop_w) / 2}:0"
+
     if len(keyframes) == 1:
         x_val = _x_for_kf(keyframes[0])
         return f"crop={crop_w}:{crop_h}:{x_val}:0"
 
-    parts = []
-    for i, kf in enumerate(keyframes):
-        t = kf["time"]
-        x = _x_for_kf(kf)
-        if i == 0:
-            parts.append(f"(between(t,{t},{t})*{x})")
-        else:
-            prev_t = keyframes[i - 1]["time"]
-            prev_x = _x_for_kf(keyframes[i - 1])
-            expr = f"(between(t,{prev_t},{t})*(1-(t-{prev_t})/{max(t-prev_t,0.001)})*{prev_x}+(t-{prev_t})/{max(t-prev_t,0.001)}*{x})"
-            parts.append(expr)
+    sk = sorted(keyframes, key=lambda k: k["time"])
+    terms = [f"(lt(t,{sk[0]['time']})*{_x_for_kf(sk[0])})"]
+    for i in range(len(sk) - 1):
+        p, c = sk[i], sk[i + 1]
+        xp = _x_for_kf(p)
+        if _is_switch(p, c):
+            # ganti orang = CUT: tahan posisi lama sampai batas, lalu loncat.
+            # Glide hanya untuk mengikuti gerakan orang yang sama.
+            terms.append(f"(gte(t,{p['time']})*lt(t,{c['time']})*{xp})")
+            continue
+        span = max(c["time"] - p["time"], 0.001)
+        xc = _x_for_kf(c)
+        terms.append(
+            f"(gte(t,{p['time']})*lt(t,{c['time']})*"
+            f"(({c['time']}-t)/{span}*{xp}+(t-{p['time']})/{span}*{xc}))"
+        )
+    terms.append(f"(gte(t,{sk[-1]['time']})*{_x_for_kf(sk[-1])})")
+    return f"crop={crop_w}:{crop_h}:x='{'+'.join(terms)}':y=0"
 
-    x_expr = "+".join(parts)
-    return f"crop={crop_w}:{crop_h}:x='{x_expr}':y=0"
+
+def _is_switch(a: dict, b: dict) -> bool:
+    """True jika dua keyframe berurutan beda pembicara (keduanya berlabel).
+
+    Keyframe manual (tanpa label) = wildcard, tetap glide halus.
+    """
+    sa, sb = a.get("speaker"), b.get("speaker")
+    return bool(sa and sb and sa != sb)
 
 
 def keypoints_for_clip(keyframes: list[dict], src_w: int, src_h: int, aspect: str) -> list[dict]:

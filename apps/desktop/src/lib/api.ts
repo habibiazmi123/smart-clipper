@@ -75,14 +75,83 @@ export function hexToAss(hex: string): string {
   return `&H00${b}${g}${r}`.toUpperCase();
 }
 
-export async function exportClip(clipId: string, style: Record<string, any>): Promise<Blob> {
+export async function exportClip(clipId: string, style: Record<string, any>, quality = "balanced"): Promise<Blob> {
   const res = await fetch(`${BASE}/clips/${clipId}/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ style }),
+    body: JSON.stringify({ style, quality }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.blob();
+}
+
+// ---- export berprogress (job + polling), untuk klip panjang ----
+export async function startExportJob(clipId: string, style: Record<string, any>, quality: string) {
+  return fetchJSON<{ job_id: string; quality: string }>(`/clips/${clipId}/export-jobs`, {
+    method: "POST",
+    body: JSON.stringify({ style, quality }),
+  });
+}
+
+export async function cancelExportJob(jobId: string) {
+  return fetchJSON(`/jobs/${jobId}/cancel`, { method: "POST" });
+}
+
+export function exportFileUrl(clipId: string, quality: string): string {
+  return `${BASE}/clips/${clipId}/export-file?quality=${encodeURIComponent(quality)}`;
+}
+
+export async function exportCurrentClipWithProgress(autoDownload = false): Promise<boolean> {
+  const st = useEditorStore.getState();
+  if (!st.clip || st.exporting) return false;
+  st.setExporting(true);
+  st.setExportProgress(0);
+  const cid = st.clip.id;
+  const q = st.exportQuality;
+  try {
+    const { job_id } = await startExportJob(cid, assStyleFromUi(st.captionStyle), q);
+    useEditorStore.getState().setExportJobId(job_id);
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 600));
+      const cur = useEditorStore.getState();
+      if (cur.exportJobId !== job_id) return false; // dibatalkan
+      const j: any = await getJob(job_id).catch(() => null);
+      if (!j || j.error) continue;
+      useEditorStore.getState().setExportProgress(j.progress ?? 0);
+      if (j.status === "completed") break;
+      if (j.status === "failed") throw new Error(j.error || "render failed");
+      if (j.status === "cancelled") return false;
+    }
+    const res = await fetch(exportFileUrl(cid, q));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const s2 = useEditorStore.getState();
+    s2.setRenderResult(URL.createObjectURL(blob), new Date().toLocaleTimeString(), cid);
+    if (autoDownload) {
+      const res2 = s2.renderResults[cid];
+      if (res2) {
+        const a = document.createElement("a");
+        a.href = res2.url;
+        a.download = `${cid}_${q}.mp4`;
+        a.click();
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    const s = useEditorStore.getState();
+    s.setExporting(false);
+    s.setExportProgress(null);
+    s.setExportJobId(null);
+  }
+}
+
+export async function cancelCurrentExport(): Promise<void> {
+  const st = useEditorStore.getState();
+  if (st.exportJobId) {
+    try { await cancelExportJob(st.exportJobId); } catch {}
+  }
 }
 
 // ---- auto render: edit teks/gaya -> preview langsung, mp4 menyusul ----

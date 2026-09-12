@@ -40,6 +40,9 @@ interface EditorState {
   clipSegments: { id: number; start: number; end: number; text: string }[];
   captionStyle: CaptionStyle;
   exporting: boolean;
+  exportProgress: number | null; // 0..1 saat job export jalan
+  exportJobId: string | null;
+  exportQuality: "fast" | "balanced" | "high";
   autoRender: boolean;
   renderResults: Record<string, { url: string; time: string }>;
   clipSpeakers: Record<string, string | null>; // clipId -> speaker dominan
@@ -56,6 +59,9 @@ interface EditorState {
   setClipSegments: (s: EditorState["clipSegments"]) => void;
   setCaptionStyle: (s: Partial<CaptionStyle>) => void;
   setExporting: (v: boolean) => void;
+  setExportProgress: (v: number | null) => void;
+  setExportJobId: (id: string | null) => void;
+  setExportQuality: (q: "fast" | "balanced" | "high") => void;
   setAutoRender: (v: boolean) => void;
   setRenderResult: (url: string, time: string, clipId: string) => void;
   setClipSpeakers: (m: Record<string, string | null>) => void;
@@ -76,6 +82,9 @@ export const useEditorStore = create<EditorState>((set) => ({
   clipSegments: [],
   captionStyle: storedStyle(),
   exporting: false,
+  exportProgress: null,
+  exportJobId: null,
+  exportQuality: "balanced",
   autoRender: true,
   renderResults: {},
   clipSpeakers: {},
@@ -96,6 +105,9 @@ export const useEditorStore = create<EditorState>((set) => ({
     return { captionStyle: next };
   }),
   setExporting: (v) => set({ exporting: v }),
+  setExportProgress: (v) => set({ exportProgress: v }),
+  setExportJobId: (id) => set({ exportJobId: id }),
+  setExportQuality: (q) => set({ exportQuality: q }),
   setAutoRender: (v) => set({ autoRender: v }),
   setRenderResult: (url, time, clipId) => set((st) => {
     const prev = st.renderResults[clipId];

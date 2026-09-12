@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useEditorStore } from "../stores/editor";
-import { getClip, updateKeyframes, resetCropToAI, editSegment, refreshClipCaptions, renderCurrentClip, scheduleAutoRender } from "../lib/api";
+import { getClip, updateKeyframes, resetCropToAI, editSegment, refreshClipCaptions, exportCurrentClipWithProgress, cancelCurrentExport, scheduleAutoRender } from "../lib/api";
 import { speakerColor } from "../lib/speakers";
 
 const PRESETS = [
@@ -11,7 +11,7 @@ const PRESETS = [
 
 export default function Sidebar() {
   const { selectedTab, setSelectedTab, keyframes, clip, project, setClip, setKeyframes, currentTime,
-    clipSegments, captionStyle, setCaptionStyle, exporting, autoRender, setAutoRender, renderResults, clipSpeakers, clipAvgX, setClipAvgX } = useEditorStore();
+    clipSegments, captionStyle, setCaptionStyle, exporting, exportProgress, exportQuality, setExportQuality, autoRender, setAutoRender, renderResults, clipSpeakers, clipAvgX, setClipAvgX } = useEditorStore();
   const renderRes = clip ? renderResults[clip.id] : undefined;
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
@@ -155,17 +155,29 @@ export default function Sidebar() {
               <label style={{ display: "flex", gap: 4, alignItems: "center" }}>Lainnya <input type="color" value={captionStyle.upcoming} onChange={(e) => setCaptionStyle({ upcoming: e.target.value })} /></label>
               <label style={{ display: "flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={captionStyle.stroke} onChange={(e) => setCaptionStyle({ stroke: e.target.checked })} /> Outline</label>
             </div>
-            <button className="btn primary" disabled={!clip || exporting} onClick={async () => {
-              const ok = await renderCurrentClip();
-              const st = useEditorStore.getState();
-              const res = clip ? st.renderResults[clip.id] : undefined;
-              if (ok && res && clip) {
-                const a = document.createElement("a");
-                a.href = res.url;
-                a.download = `${clip.id}_9x16.mp4`;
-                a.click();
-              }
-            }} style={{ width: "100%", marginBottom: 8 }}>{exporting ? "Rendering…" : "⭳ Export 9:16 + caption"}</button>
+            <label style={{ fontSize: 11, color: "var(--text-dim)" }}>Kualitas export</label>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              {(["fast", "balanced", "high"] as const).map((q) => (
+                <button key={q} className="btn" onClick={() => setExportQuality(q)}
+                  title={q === "fast" ? "Cepat, file kecil (veryfast crf28)" : q === "balanced" ? "Seimbang (fast crf23)" : "Lambat, tajam (slow crf18)"}
+                  style={{ flex: 1, fontSize: 11, padding: "4px", borderColor: exportQuality === q ? "#8b5cf6" : undefined, background: exportQuality === q ? "#8b5cf633" : undefined }}>
+                  {q === "fast" ? "⚡ Cepat" : q === "balanced" ? "⚖ Seimbang" : "💎 Tinggi"}
+                </button>
+              ))}
+            </div>
+            <button className="btn primary" disabled={!clip || exporting} onClick={() => exportCurrentClipWithProgress(true)}
+              style={{ width: "100%", marginBottom: 8 }}>{exporting ? `Rendering… ${exportProgress != null ? Math.round(exportProgress * 100) + "%" : ""}` : "⭳ Export 9:16 + caption"}</button>
+            {exporting && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ height: 8, background: "#0b0e1a", borderRadius: 4, overflow: "hidden", border: "1px solid #2a2f4a" }}>
+                  <div style={{ height: "100%", width: `${Math.round((exportProgress ?? 0) * 100)}%`, background: "#8b5cf6", transition: "width 0.4s" }} />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{Math.round((exportProgress ?? 0) * 100)}% · {exportQuality}</span>
+                  <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => cancelCurrentExport()}>Batal</button>
+                </div>
+              </div>
+            )}
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, marginBottom: 6 }}>
               <input type="checkbox" checked={autoRender} onChange={(e) => setAutoRender(e.target.checked)} />
               Auto-render setiap edit teks/gaya

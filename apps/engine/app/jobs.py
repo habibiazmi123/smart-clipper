@@ -46,6 +46,13 @@ async def _run(job: Job, fn, *args):
         if not job.cancelled:
             job.status = JobStatus.COMPLETED
             await _push(job, "done", 1.0)
+        else:
+            job.status = JobStatus.CANCELLED
+            await _push(job, "cancelled", job.progress)
+    except asyncio.CancelledError:
+        job.cancelled = True
+        job.status = JobStatus.CANCELLED
+        await _push(job, "cancelled", job.progress)
     except Exception as e:
         job.status = JobStatus.FAILED
         job.error = str(e)
@@ -81,7 +88,11 @@ def cancel_job(job_id: str) -> bool:
         return False
     j.cancelled = True
     j.status = JobStatus.CANCELLED
-    asyncio.get_event_loop().create_task(_push(j, "cancelled", j.progress))
+    j.stage = "cancelled"
+    try:
+        asyncio.get_event_loop().create_task(_push(j, "cancelled", j.progress))
+    except RuntimeError:
+        pass  # endpoint sync tanpa loop: polling GET /jobs tetap baca status
     return True
 
 
