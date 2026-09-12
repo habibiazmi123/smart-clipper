@@ -1,7 +1,8 @@
 import sqlite3
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.db import init_db
@@ -13,10 +14,17 @@ app.include_router(projects.router, prefix="/api")
 app.include_router(clips.router, prefix="/api")
 app.include_router(jobs_api.router, prefix="/api")
 
-# serve frontend build
+# serve frontend build with SPA fallback
 frontend_dist = Path(__file__).parent.parent.parent / "desktop" / "dist"
 if frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+    app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="static-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(request: Request, full_path: str):
+        file_path = frontend_dist / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(frontend_dist / "index.html")
 
 
 @app.on_event("startup")

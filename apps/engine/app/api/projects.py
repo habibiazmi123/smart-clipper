@@ -1,5 +1,6 @@
 import sqlite3
 import uuid
+import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.config import settings
@@ -75,13 +76,24 @@ async def analyze_project(pid: str, req: AnalyzeReq):
     if not p:
         conn.close()
         raise HTTPException(404)
+    conn.close()
 
+    def _run_analysis():
+        _do_analysis(pid, req)
+
+    asyncio.get_event_loop().run_in_executor(None, _run_analysis)
+    return {"status": "analysis_started", "project_id": pid}
+
+
+def _do_analysis(pid: str, req: AnalyzeReq):
     from app.services.import_service import extract_metadata, download_video, extract_audio
     from app.providers.whisper_provider import transcribe
     from app.domain.hooks import generate_candidates, score_candidate
     from app.db import list_hooks_for_project
     import json
 
+    conn = _get_conn()
+    p = get_project(conn, pid)
     pdir = settings.DATA_ROOT / "projects" / pid
     update_project(conn, pid, status="downloading")
 
@@ -92,7 +104,9 @@ async def analyze_project(pid: str, req: AnalyzeReq):
         if source_url.startswith("http"):
             video_path = download_video(pid, source_url, pdir)
         else:
-            raise HTTPException(400, "No video found")
+            update_project(conn, pid, status="failed")
+            conn.close()
+            return
     else:
         video_path = video_files[0]
 
@@ -186,4 +200,3 @@ async def analyze_project(pid: str, req: AnalyzeReq):
     detector.close()
     update_project(conn, pid, status="ready")
     conn.close()
-    return {"status": "analyzed", "clips": len(top_hooks)}
