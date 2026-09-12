@@ -1,0 +1,28 @@
+[project]
+name = "smart-clipper-engine"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+    "fastapi>=0.141.0,<0.142",
+    "uvicorn>=0.52.0,<0.53",
+    "sse-starlette>=3.4.0,<4",
+    "pydantic>=2.13.0,<3",
+    "mediapipe==0.10.35",
+    "mlx-whisper>=0.4.0,<0.5",
+    "mlx>=0.32.0,<1",
+    "opencv-python>=5.0.0,<6",
+    "numpy>=2.5.0,<3",
+    "yt-dlp>=2026.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.0,<10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

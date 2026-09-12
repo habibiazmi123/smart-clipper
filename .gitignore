@@ -2,6 +2,10 @@ data/
 node_modules/
 __pycache__/
 *.pyc
+*.pyo
 .venv/
 dist/
+build/
 .DS_Store
+*.egg-info/
+.pytest_cache/
