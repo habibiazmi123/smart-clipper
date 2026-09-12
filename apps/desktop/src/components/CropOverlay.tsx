@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { useEditorStore } from "../stores/editor";
 import { updateKeyframes } from "../lib/api";
+import { speakerColor } from "../lib/speakers";
 
 // ponytail: linear interp, cukup untuk follow wajah saat play
 export function interpolateKeyframes(kfs: any[], t: number) {
@@ -62,6 +63,8 @@ export default function CropOverlay() {
   // bukan ganti label di wajah yang sama
   const cxPrev = interpolateKeyframes(keyframes, currentTime - 0.6).cx;
   const justSwitched = !!(spkNow && spkPrev && spkNow !== spkPrev) && Math.abs(crop.cx - cxPrev) > 0.08;
+  // rectangle sewarna speaker (= warna blok timeline & dot sidebar segmen ini)
+  const rectColor = justSwitched ? "#f59e0b" : speakerColor(spkNow);
   const nw = cropNormW(vidSize.w, vidSize.h, aspect);
   const half = nw / 2;
   const cx = Math.max(half, Math.min(1 - half, crop.cx));
@@ -120,10 +123,10 @@ export default function CropOverlay() {
         data-testid="smart-crop-rect"
         style={{
           position: "absolute", left: `${left}%`, top: 0, width: `${nw * 100}%`, height: "100%",
-          border: `2px solid ${justSwitched ? "#f59e0b" : "#8b5cf6"}`, borderRadius: 4, cursor: "ew-resize", touchAction: "none",
+          border: `2px solid ${rectColor}`, borderRadius: 4, cursor: "ew-resize", touchAction: "none",
         }}
       >
-        <div style={{ position: "absolute", top: 6, left: "50%", transform: "translateX(-50%)", background: justSwitched ? "#f59e0b" : "#6366f1", color: "#fff", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 4 }}>
+        <div style={{ position: "absolute", top: 6, left: "50%", transform: "translateX(-50%)", background: rectColor, color: "#fff", fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 4 }}>
           {aspect}{spkNow ? ` · ${spkNow}` : ""}{saving ? " •" : ""}
         </div>
       </div>

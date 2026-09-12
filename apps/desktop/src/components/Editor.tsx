@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getProject, getClip, getCaptions, scheduleAutoRender } from "../lib/api";
+import { dominantSpeaker } from "../lib/speakers";
 import { useEditorStore } from "../stores/editor";
 import VideoPlayer from "./VideoPlayer";
 import CropOverlay from "./CropOverlay";
@@ -11,7 +12,7 @@ import Sidebar from "./Sidebar";
 export default function Editor() {
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const { setProject, setClip, setKeyframes, setClipWords, setClipSegments, project, clip, captionStyle, setVideoRef } = useEditorStore();
+  const { setProject, setClip, setKeyframes, setClipWords, setClipSegments, project, clip, captionStyle, setVideoRef, setClipSpeakers, setClipAvgX } = useEditorStore();
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastStyleKey = useRef<string | null>(null);
 
@@ -23,6 +24,28 @@ export default function Editor() {
     if (!projectId) return;
     getProject(projectId).then(setProject).catch(() => navigate("/"));
   }, [projectId]);
+
+  // meta per-segmen (avg crop + speaker dominan) untuk warna timeline/sidebar
+  useEffect(() => {
+    if (!project?.clips?.length) return;
+    let alive = true;
+    (async () => {
+      const spk: Record<string, string | null> = {};
+      const avg: Record<string, number> = {};
+      await Promise.all(project.clips.slice(0, 15).map(async (c: any) => {
+        try {
+          const d = await getClip(c.id);
+          const kfs = d.keyframes || [];
+          if (kfs.length) {
+            avg[c.id] = kfs.reduce((s: number, k: any) => s + k.center_x, 0) / kfs.length;
+            spk[c.id] = dominantSpeaker(kfs);
+          }
+        } catch {}
+      }));
+      if (alive) { setClipSpeakers(spk); setClipAvgX(avg); }
+    })();
+    return () => { alive = false; };
+  }, [project?.id]);
 
   useEffect(() => {
     if (!project?.clips?.length) return;

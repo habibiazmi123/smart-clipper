@@ -97,3 +97,45 @@ def test_two_distinct_faces_get_two_ids():
     tr = SpeakerTracker()
     tr.update([_face(0.25), _face(0.70)], {0: 8.0, 1: 1.0}, True, 0.0)
     assert set(tr.tracks) == {"A", "B"}
+
+
+def test_shared_tracker_keeps_id_across_calls():
+    """Satu tracker untuk banyak clip: wajah statis = ID sama terus."""
+    tr = SpeakerTracker()
+    ids = set()
+    for i in range(6):
+        r = tr.update([_face(0.44)], {0: 5.0}, True, i * 0.5)
+        ids.add(r["speaker"])
+    assert ids == {"A"}
+
+
+def test_takeover_fresh_track_keeps_id():
+    """Pengambilalihan ke wajah yang kontinu = ID lama dipertahankan."""
+    tr = SpeakerTracker()
+    for i in range(3):
+        tr.update([_face(0.3)], {0: 8.0}, True, i * 0.5)
+    assert tr.current == "A"
+    # A hilang, B muncul dan kontinu -> takeover ke B, lalu B menetap
+    for i in range(3, 8):
+        r = tr.update([_face(0.7)], {0: 8.0}, True, i * 0.5)
+    assert r["speaker"] == "B"
+    for i in range(8, 12):
+        r = tr.update([_face(0.7)], {0: 8.0}, True, i * 0.5)
+    assert r["speaker"] == "B"
+
+
+def test_takeover_stale_track_gets_fresh_id():
+    """Takeover ke wajah yang cocok track basi (shot cut) = ID baru."""
+    tr = SpeakerTracker()
+    for i in range(3):
+        tr.update([_face(0.3)], {0: 8.0}, True, i * 0.5)
+    assert tr.current == "A"  # last_seen[A] = 1.0
+    # B muncul dan menetap -> takeover normal ke B
+    for i in range(3, 9):
+        tr.update([_face(0.7)], {0: 8.0}, True, i * 0.5)
+    assert tr.current == "B"
+    # B hilang (hold), lalu wajah di posisi mirip A muncul >2s kemudian
+    tr.update([], {}, True, 4.5)
+    tr.update([], {}, True, 5.0)
+    r = tr.update([_face(0.32)], {0: 8.0}, True, 6.0)
+    assert r["speaker"] not in ("A", "B"), "track basi tidak boleh diwarisi"

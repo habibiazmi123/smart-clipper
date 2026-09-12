@@ -140,21 +140,24 @@ def _do_analysis(pid: str, req: AnalyzeReq):
 
     # face detect + active-speaker crop for each clip
     from app.providers.face_provider import create_detector
-    from app.services.speaker_service import analyze_clip_speakers, load_wav_mono
+    from app.services.speaker_service import (
+        analyze_clip_speakers, load_wav_mono, SpeakerTracker)
     detector = create_detector()
+    # satu tracker untuk semua clip (urut waktu): ID konsisten lintas segmen
+    tracker = SpeakerTracker(sample_interval=settings.FACE_SAMPLE_INTERVAL)
     try:
         wav = load_wav_mono(str(audio_path))
     except Exception:
         wav = None
 
-    for h in top_hooks:
+    for h in sorted(top_hooks, key=lambda x: x.start):
         clip_id = uuid.uuid4().hex[:10]
         insert_clip(conn, id=clip_id, project_id=pid, hook_candidate_id=h.id,
                     source_start=h.start, source_end=h.end, aspect_ratio=req.aspect_ratio)
 
         centers = analyze_clip_speakers(
             str(video_path), detector, h.start, h.end, wav=wav,
-            transcript_segs=transcript["segments"])
+            transcript_segs=transcript["segments"], tracker=tracker)
 
         from app.services.vision_service import smooth_centers, interpolate_centers
         if centers:

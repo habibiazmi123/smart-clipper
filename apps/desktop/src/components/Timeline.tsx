@@ -1,10 +1,9 @@
 import { useEditorStore } from "../stores/editor";
 import { getClip } from "../lib/api";
-
-const COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#a855f7", "#ec4899", "#06b6d4"];
+import { speakerColor } from "../lib/speakers";
 
 export default function Timeline() {
-  const { clip, project, currentTime, keyframes, videoRef } = useEditorStore();
+  const { clip, project, currentTime, keyframes, videoRef, clipSpeakers } = useEditorStore();
   const clips = project?.clips || [];
   const total = clips.length
     ? clips[clips.length - 1].end - clips[0].start
@@ -50,14 +49,16 @@ export default function Timeline() {
         {(clips.length ? clips : clip ? [{ id: clip.id, start: clip.source_start, end: clip.source_end }] : []).map((c: any, i: number) => {
           const w = Math.max(24, ((c.end - c.start) / Math.max(total, 0.001)) * 100);
           const active = clip?.id === c.id;
+          // blok sewarna speaker dominan segmen (= warna rectangle & dot sidebar)
+          const base = speakerColor(c.id ? clipSpeakers[c.id] : null, i);
           return (
             <div
               key={c.id || i}
               onClick={() => c.id && selectClip(c.id)}
-              title={`${fmt(c.start)} - ${fmt(c.end)}`}
+              title={`${fmt(c.start)} - ${fmt(c.end)}${c.id && clipSpeakers[c.id] ? ` · speaker ${clipSpeakers[c.id]}` : ""}`}
               style={{
                 flex: `${w} 1 0%`, minWidth: 28, borderRadius: 4, cursor: "pointer",
-                background: active ? COLORS[i % COLORS.length] : COLORS[i % COLORS.length] + "55",
+                background: active ? base : base + "55",
                 border: active ? "1px solid #fff3" : "1px solid transparent",
                 color: "#fff", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center",
                 position: "relative", overflow: "hidden",
@@ -84,7 +85,7 @@ export default function Timeline() {
             const switched = kf.speaker && prev?.speaker && kf.speaker !== prev.speaker
               && Math.abs(kf.center_x - (prev?.center_x ?? kf.center_x)) > 0.05;
             return (
-            <div key={i} title={`${fmt(kf.time)}${kf.speaker ? ` · ${kf.speaker}` : ""}`} style={{ position: "absolute", left: `${((kf.time - clip.source_start) / Math.max(dur, 0.001)) * 100}%`, top: switched ? 0 : 2, width: switched ? 3 : 6, height: switched ? 10 : 6, borderRadius: switched ? 2 : "50%", background: switched ? "#fff" : kf.source === "ai" ? "#8b5cf6" : "#f59e0b", transform: "translateX(-50%)" }} />
+            <div key={i} title={`${fmt(kf.time)}${kf.speaker ? ` · ${kf.speaker}` : ""}`} style={{ position: "absolute", left: `${((kf.time - clip.source_start) / Math.max(dur, 0.001)) * 100}%`, top: switched ? 0 : 2, width: switched ? 3 : 6, height: switched ? 10 : 6, borderRadius: switched ? 2 : "50%", background: switched ? "#fff" : kf.speaker ? speakerColor(kf.speaker) : kf.source === "ai" ? "#8b5cf6" : "#f59e0b", transform: "translateX(-50%)" }} />
             );
           })}
         </div>

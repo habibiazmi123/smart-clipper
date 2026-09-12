@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useEditorStore } from "../stores/editor";
 import { getClip, updateKeyframes, resetCropToAI, editSegment, refreshClipCaptions, renderCurrentClip, scheduleAutoRender } from "../lib/api";
-
-const DOT = ["#6366f1", "#22c55e", "#f59e0b", "#a855f7", "#ec4899", "#06b6d4"];
+import { speakerColor } from "../lib/speakers";
 
 const PRESETS = [
   { id: "hormozi", label: "Hormozi", active: "#FFFF00", upcoming: "#FFFFFF" },
@@ -12,30 +11,12 @@ const PRESETS = [
 
 export default function Sidebar() {
   const { selectedTab, setSelectedTab, keyframes, clip, project, setClip, setKeyframes, currentTime,
-    clipSegments, captionStyle, setCaptionStyle, exporting, autoRender, setAutoRender, renderResults } = useEditorStore();
+    clipSegments, captionStyle, setCaptionStyle, exporting, autoRender, setAutoRender, renderResults, clipSpeakers, clipAvgX, setClipAvgX } = useEditorStore();
   const renderRes = clip ? renderResults[clip.id] : undefined;
-  const [avgs, setAvgs] = useState<Record<string, number>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
 
   const tabs = ["crop", "script", "effect"] as const;
-
-  useEffect(() => {
-    if (!project?.clips) return;
-    let alive = true;
-    (async () => {
-      const m: Record<string, number> = {};
-      await Promise.all(project.clips.slice(0, 15).map(async (c: any) => {
-        try {
-          const d = await getClip(c.id);
-          const kfs = d.keyframes || [];
-          if (kfs.length) m[c.id] = kfs.reduce((s: number, k: any) => s + k.center_x, 0) / kfs.length;
-        } catch {}
-      }));
-      if (alive) setAvgs(m);
-    })();
-    return () => { alive = false; };
-  }, [project?.id]);
 
   const selectClip = async (clipId: string, autoplay = false) => {
     try {
@@ -53,11 +34,11 @@ export default function Sidebar() {
     const HALF = 0.158;
     const clamped = Math.max(HALF, Math.min(1 - HALF, nx));
     if (clip?.id === clipId) {
-      const cur = avgs[clipId] ?? 0.5;
+      const cur = clipAvgX[clipId] ?? 0.5;
       const d = clamped - cur;
       const next = keyframes.map((k) => ({ ...k, center_x: Math.max(HALF, Math.min(1 - HALF, k.center_x + d)), source: "manual" }));
       setKeyframes(next);
-      setAvgs((m) => ({ ...m, [clipId]: clamped }));
+      setClipAvgX({ ...clipAvgX, [clipId]: clamped });
       try { await updateKeyframes(clipId, next); } catch {}
     } else {
       await selectClip(clipId);
@@ -66,7 +47,7 @@ export default function Sidebar() {
       const d = clamped - avg;
       const next = kfs.map((k: any) => ({ ...k, center_x: Math.max(HALF, Math.min(1 - HALF, k.center_x + d)), source: "manual" }));
       setKeyframes(next);
-      setAvgs((m) => ({ ...m, [clipId]: clamped }));
+      setClipAvgX({ ...useEditorStore.getState().clipAvgX, [clipId]: clamped });
       try { await updateKeyframes(clipId, next); } catch {}
     }
   };
@@ -99,7 +80,7 @@ export default function Sidebar() {
             </div>
             {(project?.clips || []).map((c: any, i: number) => {
               const val = c.id === clip?.id
-                ? (() => { const kfs = keyframes; if (!kfs.length) return avgs[c.id] ?? 0.5;
+                ? (() => { const kfs = keyframes; if (!kfs.length) return clipAvgX[c.id] ?? 0.5;
                     // interpolasi saat play agar slider ikut gerak
                     const s = [...kfs].sort((a: any, b: any) => a.time - b.time);
                     if (currentTime <= s[0].time) return s[0].center_x;
@@ -108,14 +89,16 @@ export default function Sidebar() {
                       return p.center_x + f * (q.center_x - p.center_x);
                     }
                     return s[s.length-1].center_x; })()
-                : avgs[c.id] ?? 0.5;
+                : clipAvgX[c.id] ?? 0.5;
               const active = c.id === clip?.id;
+              // dot + slider sewarna speaker segmen (= warna rectangle & blok timeline)
+              const spkColor = speakerColor(clipSpeakers[c.id], i);
               return (
-                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6, marginBottom: 4, background: active ? "#8b5cf622" : "transparent", border: active ? "1px solid #8b5cf655" : "1px solid transparent" }}>
-                  <span style={{ width: 20, height: 20, borderRadius: "50%", background: DOT[i % DOT.length], color: "#fff", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
+                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6, marginBottom: 4, background: active ? spkColor + "22" : "transparent", border: active ? `1px solid ${spkColor}55` : "1px solid transparent" }}>
+                  <span style={{ width: 20, height: 20, borderRadius: "50%", background: spkColor, color: "#fff", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
                   <input type="range" min={16} max={84} value={Math.round(val * 100)}
                     onChange={(e) => shiftClip(c.id, Number(e.target.value) / 100)}
-                    style={{ flex: 1, accentColor: "#8b5cf6" }} />
+                    style={{ flex: 1, accentColor: spkColor }} />
                   <button className="btn" style={{ padding: "2px 7px", fontSize: 11 }} onClick={() => selectClip(c.id, true)} title="Preview">▷</button>
                 </div>
               );

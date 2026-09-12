@@ -87,6 +87,7 @@ class SpeakerTracker:
         self.alpha = mouth_alpha if mouth_alpha is not None else settings.SPEAKER_MOUTH_ALPHA
         self.iou_thr = iou_threshold if iou_threshold is not None else settings.SPEAKER_IOU_THRESHOLD
         self.tracks: dict[str, dict] = {}
+        self.used_ids: set[str] = set()  # huruf tidak dipakai ulang: A tetap orang yang sama
         self.current: str | None = None
         self.last_pos: dict = {"cx": 0.5, "cy": 0.5}
         self.misses = 0
@@ -97,9 +98,19 @@ class SpeakerTracker:
                speaking: bool, t: float) -> dict | None:
         """faces: [{x,y,w,h,confidence}] normalized. mouth: face_idx -> energy."""
         if not faces:
+            # bingkai kosong = pembicara hilang: tahan dulu, lalu lepas
+            self.misses += 1
+            if self.misses <= self.hold and self.current is not None:
+                return {"speaker": self.current, "cx": self.last_pos["cx"],
+                        "cy": self.last_pos["cy"], "confidence": 0.5,
+                        "time": round(t, 3)}
             return None
-        # track basi (>5s tak terlihat) dibuang: orang baru jangan warisi ID lama
-        for tid in [k for k, tr in self.tracks.items() if t - tr.get("last_seen", t) > 5.0]:
+        # umur track SEBELUM update sampel ini (untuk takeover stale)
+        prev_seen = {tid: tr.get("last_seen", t) for tid, tr in self.tracks.items()}
+        stale_after = settings.SPEAKER_STALE_TAKEOVER_SEC
+        # track basi dibuang; ingat cukup lama agar orang yang kembali = ID sama
+        mem = settings.SPEAKER_TRACK_MEMORY_SEC
+        for tid in [k for k, tr in self.tracks.items() if t - tr.get("last_seen", t) > mem]:
             del self.tracks[tid]
             if self.challenger == tid:
                 self.challenger, self.wins = None, 0
@@ -121,7 +132,8 @@ class SpeakerTracker:
                         best_dist, best_tid = d, tid
                 best_id = best_tid
             if best_id is None:
-                best_id = _next_id(set(self.tracks))
+                best_id = _next_id(self.used_ids)
+                self.used_ids.add(best_id)
                 self.tracks[best_id] = {"mouth_ema": 0.0}
             assigned[i] = best_id
             tr = self.tracks[best_id]
@@ -131,6 +143,7 @@ class SpeakerTracker:
             tr["mouth_ema"] = self.alpha * e + (1 - self.alpha) * tr.get("mouth_ema", 0.0)
 
         visible = [assigned[i] for i in range(len(faces))]
+        visible = list(dict.fromkeys(visible))  # duplikat deteksi -> satu id
 
         # 2. score (mouth relative antar wajah yang terlihat)
         peak = max(self.tracks[tid]["mouth_ema"] for tid in visible)
@@ -151,7 +164,19 @@ class SpeakerTracker:
                 return {"speaker": self.current, "cx": self.last_pos["cx"],
                         "cy": self.last_pos["cy"], "confidence": 0.5,
                         "time": round(t, 3)}
-            self.current = max(visible, key=lambda tid: scores[tid])
+            best = max(visible, key=lambda tid: scores[tid])
+            if t - prev_seen.get(best, t) > stale_after:
+                # wajah muncul setelah jeda (shot cut / orang baru):
+                # ID baru, jangan warisi identitas basi
+                nid = _next_id(self.used_ids)
+                self.used_ids.add(nid)
+                btr = self.tracks[best]
+                self.tracks[nid] = {k: btr[k] for k in ("x", "y", "w", "h", "confidence")
+                                    if k in btr}
+                self.tracks[nid].update(mouth_ema=0.0, last_seen=t)
+                scores[nid] = scores[best_id]
+                best = nid
+            self.current = best
             self.misses = 0
             self.challenger, self.wins = None, 0
         elif len(visible) == 1:
@@ -185,13 +210,17 @@ class SpeakerTracker:
 
 def analyze_clip_speakers(video_path: str, detector, start: float, end: float,
                           wav: tuple | None = None, transcript_segs: list | None = None,
-                          sample_interval: float | None = None) -> list[dict]:
-    """Full per-clip pass. Returns [{time, cx, cy, speaker, sconf}]."""
+                          sample_interval: float | None = None,
+                          tracker: "SpeakerTracker | None" = None) -> list[dict]:
+    """Per-clip pass. Berbagi satu tracker lintas clip = ID konsisten
+    (orang sama = huruf sama) selama framing kontinu. Returns
+    [{time, cx, cy, speaker, sconf}]."""
     interval = sample_interval or settings.FACE_SAMPLE_INTERVAL
     mouth_dt = settings.SPEAKER_MOUTH_DT
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    tracker = SpeakerTracker(sample_interval=interval)
+    if tracker is None:
+        tracker = SpeakerTracker(sample_interval=interval)
     out = []
     t = start
     while t < end:

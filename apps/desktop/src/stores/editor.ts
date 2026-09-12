@@ -42,6 +42,8 @@ interface EditorState {
   exporting: boolean;
   autoRender: boolean;
   renderResults: Record<string, { url: string; time: string }>;
+  clipSpeakers: Record<string, string | null>; // clipId -> speaker dominan
+  clipAvgX: Record<string, number>; // clipId -> rata-rata center_x
   setProject: (p: any) => void;
   setClip: (c: any) => void;
   setKeyframes: (k: Keyframe[]) => void;
@@ -56,6 +58,8 @@ interface EditorState {
   setExporting: (v: boolean) => void;
   setAutoRender: (v: boolean) => void;
   setRenderResult: (url: string, time: string, clipId: string) => void;
+  setClipSpeakers: (m: Record<string, string | null>) => void;
+  setClipAvgX: (m: Record<string, number>) => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -74,6 +78,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   exporting: false,
   autoRender: true,
   renderResults: {},
+  clipSpeakers: {},
+  clipAvgX: {},
   setProject: (p) => set({ project: p }),
   setClip: (c) => set({ clip: c }),
   setKeyframes: (k) => set({ keyframes: k }),
@@ -96,4 +102,6 @@ export const useEditorStore = create<EditorState>((set) => ({
     if (prev) { try { URL.revokeObjectURL(prev.url); } catch {} }
     return { renderResults: { ...st.renderResults, [clipId]: { url, time } } };
   }),
+  setClipSpeakers: (m) => set({ clipSpeakers: m }),
+  setClipAvgX: (m) => set({ clipAvgX: m }),
 }));

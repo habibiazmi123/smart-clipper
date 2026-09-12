@@ -36,9 +36,13 @@ class Settings:
     SPEAKER_SWITCH_MARGIN: float = 0.15
     SPEAKER_MIN_DWELL_SEC: float = 1.5  # challenger unggul selama ini baru switch
     SPEAKER_HOLD_SEC: float = 1.0  # wajah hilang sesaat -> tahan framing
+    # takeover karena pembicara pergi: wajah yang cocok ke track basi
+    # (>2s tak terlihat, biasanya shot cut) dapat ID BARU, bukan warisi ID lama
+    SPEAKER_STALE_TAKEOVER_SEC: float = 2.0
     SPEAKER_SILENCE_RMS: float = 0.03  # kalibrasi: speech 0.09-0.18, sunyi 0.0
     SPEAKER_MOUTH_ALPHA: float = 0.4
     SPEAKER_IOU_THRESHOLD: float = 0.3
+    SPEAKER_TRACK_MEMORY_SEC: float = 30.0  # ingat wajah lama: kembali = ID sama
     SPEAKER_MOUTH_DT: float = 0.12  # pasang frame pembanding untuk mouth-motion
 
 

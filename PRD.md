@@ -670,6 +670,10 @@ V1 SIGNALS (all deterministic, computed per sample window ~0.5s):
    (threshold 0.3) + centroid distance fallback.
    Unmatched box -> new track id ("A", "B", ...).
    Store per track: id, boxes over time, total visible duration.
+   ONE tracker instance is shared across all clips of an analysis run
+   (processed in time order) so the same person keeps the same id
+   in every segment. Track letters are never reused within a run.
+   Stale tracks are forgotten after TRACK_MEMORY (30s).
 
 2. mouth_motion proxy (no landmarks):
    For each tracked face, take lower-third of the face box
@@ -703,6 +707,13 @@ V1 DECISION RULE (hysteresis = anti-jitter):
 - Face hilang sesaat (detection dropout, 1-2 sampel):
   TAHAN framing terakhir selama HOLD_SEC (1.0s), jangan loncat
   ke false-positive. Baru pindah jika wajah tak kembali.
+- Takeover setelah pembicara pergi: wajah yang cocok ke track basi
+  (>2s tak terlihat, biasanya shot cut) dapat ID BARU, bukan warisi
+  identitas lama. Track huruf tidak dipakai ulang dalam satu run.
+- Jujur diketahui: potongan shot (ganti kamera) memutus kontinuitas
+  posisi; orang yang sama bisa dapat huruf baru selepas cut.
+  Crop SELALU mengikuti wajah yang benar; yang berubah hanya label.
+  v2: face embedding untuk identitas lintas cut.
 - Otherwise keep current speaker, even if challenger leads slightly.
 - Single face visible -> that face, no switching logic.
 
