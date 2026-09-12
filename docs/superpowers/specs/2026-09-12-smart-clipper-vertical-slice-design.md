@@ -52,9 +52,21 @@ target machine, and the implementation depends on them.
 - Hardware: arm64, 8GB RAM — the PRD's stated target.
 - Python: system default is 3.14.7, which **cannot** run this project.
   `mediapipe` and `mlx-whisper` have no 3.14 wheels. Python **3.12** resolves
-  all critical dependencies: `mediapipe 1.0.1`, `mlx-whisper 0.4.3`,
-  `opencv-python 5.0.0.93`, `fastapi 0.141.1`. `uv` is installed and pins 3.12
-  at no cost.
+  all critical dependencies: `mlx-whisper 0.4.3`, `opencv-python 5.0.0.93`,
+  `fastapi 0.141.1`. `uv` is installed and pins 3.12 at no cost.
+- **`mediapipe` must be pinned to `==0.10.35`.** This is not a preference. The
+  latest version, 1.0.1, is what `uv` resolves to by default and it **crashes
+  hard** on this machine: `TensorsToDetectionsCalculator::Open()` aborts with
+  `graph_service.h:139] Check failed: service_ Service is unavailable` inside
+  `DrishtiMetalHelper`. Passing `delegate=CPU` does not avoid it — the Metal
+  service is requested regardless. Both 1.0.1 and 0.10.35 have removed the
+  legacy `mp.solutions.face_detection` API entirely, so the Tasks API is the
+  only option, and it only functions on 0.10.35. Verified working there:
+  1 face at 0.92 confidence, correct bounding box, and `RunningMode.VIDEO`
+  accepting OpenCV BGR→RGB frames via `detect_for_video`.
+- The face model is a separate ~224KB `.task`/`.tflite` asset
+  (`blaze_face_short_range.tflite`) that must be downloaded; it is not bundled
+  in the wheel.
 - Binaries present: `ffmpeg`, `yt-dlp`, `ollama`, `node`, `cargo`.
 - ffmpeg is built with `--enable-libass`, `--enable-libfreetype`,
   `--enable-libharfbuzz`. The `ass` and `subtitles` filters are both available,
@@ -151,7 +163,14 @@ Two clarifications on columns whose meaning would otherwise be guessed:
 
 - `transcript_segments.confidence` is derived from Whisper's `avg_logprob` as
   `exp(avg_logprob)`, giving a 0..1 value. Whisper does not emit a confidence
-  figure directly, and the hook scorer consumes this normalized form.
+  figure directly, and the hook scorer consumes this normalized form. Verified
+  against real output: `avg_logprob=-0.276` → `0.759`.
+- Verified `mlx_whisper.transcribe` output schema, which the parser depends on.
+  Segments carry `id, seek, start, end, text, tokens, temperature, avg_logprob,
+  compression_ratio, no_speech_prob, words`; words carry
+  `word, start, end, probability`. Word `start`/`end` arrive as `np.float64`
+  and **must be cast to `float`** before JSON serialization or persistence
+  fails. The model id is `mlx-community/whisper-small-mlx`.
 - `face_detections` rows are keyed to the project and timestamped in **source**
   time, not clip time. Clips reference them by time range. This means detection
   runs once per source video and is reused by every clip drawn from it, rather
@@ -373,8 +392,10 @@ duration.
 | Risk | Handling |
 |---|---|
 | Python 3.14 default breaks install | Pin 3.12 via `uv`; verified to resolve all deps |
+| **mediapipe 1.0.1 crashes on Metal** | **Pin `==0.10.35`; verified working. Default resolution picks the broken version, so the pin is load-bearing** |
 | Crop expression not evaluated per frame | Verified by luma measurement before design |
 | `-ss` timebase shifts crop animation | Keyframes converted to clip-relative; covered by a test |
+| Whisper word times are `np.float64` | Cast to `float` at the parser boundary; verified schema |
 | Memory pressure on 8GB | Sequential model load/release; never co-resident |
 | ffmpeg lacking libass | Verified compiled in |
 | yt-dlp breakage from YouTube changes | Isolated in one provider; local file import is an unaffected path |
