@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 class Settings:
     DATA_ROOT: Path = Path("./data")
     WHISPER_MODEL: str = "mlx-community/whisper-small-mlx"
-    FACE_MODEL: str = "apps/engine/assets/blaze_face_short_range.tflite"
+    FACE_MODEL: str = str(Path(__file__).parent.parent / "assets" / "blaze_face_short_range.tflite")
     LLM_MODEL: str = "llama3.2:latest"
     OLLAMA_URL: str = "http://127.0.0.1:11434"
     HOST: str = "127.0.0.1"
