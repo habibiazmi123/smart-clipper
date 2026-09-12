@@ -42,9 +42,12 @@ export default function CropOverlay() {
   return (
     <div
       ref={containerRef}
-      style={{ position: "relative", width: "100%", aspectRatio: "16/9", background: "#000", borderRadius: 8, overflow: "hidden", cursor: "crosshair" }}
+      style={{ position: "absolute", inset: 16, pointerEvents: "none", cursor: "crosshair" }}
       onMouseDown={handleMouseDown}
     >
+      {/* Dimmed area outside crop */}
+      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.4)" }} />
+      {/* Crop window - clear area */}
       <div
         style={{
           position: "absolute",
@@ -54,7 +57,9 @@ export default function CropOverlay() {
           height: "100%",
           border: "2px solid var(--accent)",
           borderRadius: 4,
-          pointerEvents: "none",
+          background: "transparent",
+          pointerEvents: "auto",
+          cursor: "move",
         }}
       />
     </div>

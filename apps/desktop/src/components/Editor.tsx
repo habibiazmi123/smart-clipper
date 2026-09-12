@@ -47,10 +47,10 @@ export default function Editor() {
       </div>
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          <div style={{ flex: 1, padding: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ flex: 1, padding: 16, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
             <VideoPlayer videoSrc={`http://127.0.0.1:8719/api/media/${projectId}/video`} videoRef={videoRef} />
+            <CropOverlay />
           </div>
-          <CropOverlay />
           <Timeline />
         </div>
         <Sidebar />
