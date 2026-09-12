@@ -64,11 +64,11 @@ def build_crop_expr(keyframes: list[dict], src_w: int, src_h: int, aspect_w: int
         t = kf["time"]
         x = _x_for_kf(kf)
         if i == 0:
-            parts.append(f"(between(t,{t},{t}){x})")
+            parts.append(f"(between(t,{t},{t})*{x})")
         else:
             prev_t = keyframes[i - 1]["time"]
             prev_x = _x_for_kf(keyframes[i - 1])
-            expr = f"(between(t,{prev_t},{t})*(1-(t-{prev_t})/{max(t-prev_t,0.001)}){prev_x}+(t-{prev_t})/{max(t-prev_t,0.001)}*{x})"
+            expr = f"(between(t,{prev_t},{t})*(1-(t-{prev_t})/{max(t-prev_t,0.001)})*{prev_x}+(t-{prev_t})/{max(t-prev_t,0.001)}*{x})"
             parts.append(expr)
 
     x_expr = "+".join(parts)
