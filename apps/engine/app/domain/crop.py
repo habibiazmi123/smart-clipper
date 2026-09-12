@@ -41,6 +41,7 @@ def centers_to_keyframes(centers: list[dict], src_w: int, src_h: int, aspect: st
             "time": c["time"],
             "center_x": round(cx, 4),
             "center_y": round(cy, 4),
+            **({"speaker": c["speaker"]} if c.get("speaker") else {}),
         })
     return result
 

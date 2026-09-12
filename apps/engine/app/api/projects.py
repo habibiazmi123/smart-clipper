@@ -138,45 +138,51 @@ def _do_analysis(pid: str, req: AnalyzeReq):
 
     update_project(conn, pid, status="cropping")
 
-    # face detect + crop for each clip
-    from app.providers.face_provider import create_detector, detect_faces_frame
-    import cv2
+    # face detect + active-speaker crop for each clip
+    from app.providers.face_provider import create_detector
+    from app.services.speaker_service import analyze_clip_speakers, load_wav_mono
     detector = create_detector()
-    cap = cv2.VideoCapture(str(video_path))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    try:
+        wav = load_wav_mono(str(audio_path))
+    except Exception:
+        wav = None
 
     for h in top_hooks:
         clip_id = uuid.uuid4().hex[:10]
         insert_clip(conn, id=clip_id, project_id=pid, hook_candidate_id=h.id,
                     source_start=h.start, source_end=h.end, aspect_ratio=req.aspect_ratio)
 
-        # sample frames for face detection
-        centers = []
-        t = h.start
-        while t < h.end:
-            frame_idx = int(t * fps)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-            ret, frame = cap.read()
-            if ret:
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                faces = detect_faces_frame(detector, rgb, t)
-                if faces:
-                    best = max(faces, key=lambda f: f["confidence"])
-                    centers.append({"time": round(t, 3), "cx": best["x"], "cy": best["y"]})
-            t += settings.FACE_SAMPLE_INTERVAL
-
-        cap.release()
+        centers = analyze_clip_speakers(
+            str(video_path), detector, h.start, h.end, wav=wav,
+            transcript_segs=transcript["segments"])
 
         from app.services.vision_service import smooth_centers, interpolate_centers
         if centers:
-            smoothed = smooth_centers(centers)
-            keyframes = interpolate_centers(smoothed)
+            smoothed = smooth_centers(
+                [{"time": c["time"], "cx": c["cx"]} for c in centers])
+            # speaker menempel ke sampel terdekat (tidak diinterpolasi)
+            keyframes = []
+            for kf in interpolate_centers(smoothed):
+                near = min(centers, key=lambda c: abs(c["time"] - kf["time"]))
+                keyframes.append({**kf, "speaker": near.get("speaker"),
+                                  "sconf": near.get("sconf")})
+            # ponytail: keyframes mulai di wajah pertama; tanpa jepit ini FFmpeg
+            # between() = 0 sebelum/sesudahnya -> crop loncat ke tepi. Jepit ke clip.
+            if keyframes[0]["time"] > h.start:
+                first = keyframes[0]
+                keyframes.insert(0, {"time": round(h.start, 3), "cx": first["cx"], "cy": first.get("cy", 0.5),
+                                     "speaker": first.get("speaker"), "sconf": first.get("sconf")})
+            if keyframes[-1]["time"] < h.end:
+                last = keyframes[-1]
+                keyframes.append({"time": round(h.end, 3), "cx": last["cx"], "cy": last.get("cy", 0.5),
+                                  "speaker": last.get("speaker"), "sconf": last.get("sconf")})
         else:
             keyframes = [{"time": h.start, "cx": 0.5, "cy": 0.5}]
 
         from app.domain.crop import centers_to_keyframes
         crop_kfs = centers_to_keyframes(
-            [{"time": kf["time"], "cx": kf["cx"], "cy": kf.get("cy", 0.5)} for kf in keyframes],
+            [{"time": kf["time"], "cx": kf["cx"], "cy": kf.get("cy", 0.5),
+              "speaker": kf.get("speaker")} for kf in keyframes],
             meta["width"], meta["height"], req.aspect_ratio
         )
         insert_crop_keyframes(conn, clip_id, crop_kfs, source="ai")
@@ -197,6 +203,9 @@ def _do_analysis(pid: str, req: AnalyzeReq):
         insert_caption(conn, clip_id, 0, h.start, h.end,
                        " ".join(l["text"] for l in lines))
 
-    detector.close()
+    try:
+        detector.close()
+    except Exception:
+        pass
     update_project(conn, pid, status="ready")
     conn.close()

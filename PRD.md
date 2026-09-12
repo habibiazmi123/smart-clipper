@@ -649,23 +649,109 @@ smoothed:
 ACTIVE SPEAKER
 ==================================================
 
-For videos containing multiple people:
+GOAL:
 
-Detect multiple faces.
+For videos containing multiple people, the 9:16 crop must follow
+the person who is CURRENTLY SPEAKING, not just the biggest face.
+When the speaker changes, the crop glides to the new speaker.
+When uncertain, framing stays stable (never rapid switching).
 
-Try to determine the active speaker using:
+CONSTRAINTS (local-first, M1 8GB):
 
-1. face presence
-2. mouth movement
-3. audio/transcript timing
-4. previous active speaker
-5. face size / framing
+- No new model downloads for v1.
+- Reuse: MediaPipe face boxes (already), audio WAV 16kHz (already),
+  Whisper word timestamps (already).
+- Face landmark / TalkNet-style neural models are v2 only.
 
-Architecture should allow a better active-speaker model later.
+V1 SIGNALS (all deterministic, computed per sample window ~0.5s):
 
-If active speaker detection is uncertain:
+1. face_tracks with stable IDs:
+   Match detections across consecutive samples by IoU of boxes
+   (threshold 0.3) + centroid distance fallback.
+   Unmatched box -> new track id ("A", "B", ...).
+   Store per track: id, boxes over time, total visible duration.
 
-prefer stable framing rather than rapidly switching between faces.
+2. mouth_motion proxy (no landmarks):
+   For each tracked face, take lower-third of the face box
+   (mouth region heuristic) and compute mean absolute frame
+   difference vs previous sample, normalized by box area.
+   Speaking faces show bursty high variance; still faces ~flat.
+   Smooth with EMA (alpha 0.4) per track.
+
+3. speech_energy:
+   RMS audio energy in the same 0.5s window from extracted WAV.
+   Gate: if energy below silence threshold, nobody is speaking
+   -> keep current framing.
+
+4. transcript_timing:
+   If a Whisper word/segment overlaps the window, speech is
+   happening (supports step 3 when music/noise fools RMS).
+
+5. previous speaker + face size/framing as tiebreakers.
+
+V1 DECISION RULE (hysteresis = anti-jitter):
+
+- Score each visible track:
+  score = mouth_motion * 0.5 + size_score * 0.2 + center_score * 0.1
+          + continuity_bonus(current speaker) * 0.2
+- Switch speaker ONLY IF:
+  challenger_score > current_score + SWITCH_MARGIN (0.15)
+  AND challenger wins for MIN_DWELL_SEC (1.5s) sustained
+  AND speech_energy above silence threshold.
+  (dwell/hold dalam DETIK, bukan jumlah window, agar konsisten
+  untuk sampling 0.1s maupun 0.5s)
+- Face hilang sesaat (detection dropout, 1-2 sampel):
+  TAHAN framing terakhir selama HOLD_SEC (1.0s), jangan loncat
+  ke false-positive. Baru pindah jika wajah tak kembali.
+- Otherwise keep current speaker, even if challenger leads slightly.
+- Single face visible -> that face, no switching logic.
+
+PIPELINE INTEGRATION:
+
+Replace "pick max-confidence face" in clip analysis with:
+
+  detect faces (all, not just best)
+    -> update face_tracks (IoU matching)
+    -> compute mouth_motion per track
+    -> active speaker decision with hysteresis
+    -> crop center = active speaker center
+    -> smooth + clamp (existing)
+
+Persist per crop keyframe:
+
+  { "time": ..., "center_x": ..., "center_y": ...,
+    "speaker": "A", "speaker_confidence": 0.82 }
+
+Reuse existing crop_keyframes table + add nullable `speaker`
+column (migration: ALTER TABLE, default NULL). face_tracks
+centers_json extended with track_id per sample.
+
+UI VISUALIZATION (editor follows ss.png layout):
+
+- The purple 9:16 rectangle keeps following via existing
+  interpolation + rAF playback loop (already implemented).
+- Add speaker badge on the rectangle: "9:16 · A" (track id),
+  dot turns amber for 0.5s right after a speaker switch.
+- Timeline: small tick mark at each speaker-switch timestamp.
+- Sidebar Crop tab: show "A/B" chip per segment row.
+- Manual drag still creates manual keyframe (unchanged);
+  "Reset AI" restores AI speaker trajectory.
+
+TESTS (extend existing suite):
+
+- IoU track matching: two boxes crossing -> ids stable.
+- mouth_motion: synthetic still vs changing mouth region.
+- hysteresis: flapping scores (A,B,A,B) -> no switch;
+  sustained B lead > MIN_DWELL -> switch once.
+- silence gate: zero energy -> keep framing.
+- keyframe speaker field round-trips through DB + API.
+
+PHASES:
+
+- PHASE 4b (now): v1 heuristic above, works offline, no downloads.
+- v2 (later): MediaPipe FaceLandmarker lip landmarks or
+  lightweight audio-visual model behind SpeakerProvider
+  interface. Architecture must allow the swap.
 
 ==================================================
 SMART CROP

@@ -5,6 +5,7 @@ interface Keyframe {
   center_x: number;
   center_y: number;
   source?: string;
+  speaker?: string | null;
 }
 
 interface EditorState {
@@ -16,6 +17,8 @@ interface EditorState {
   isPlaying: boolean;
   selectedTab: "crop" | "script" | "effect";
   videoRef: { current: HTMLVideoElement | null } | null;
+  // true = klik user (lompat ke awal segmen), false = auto-follow saat play (jangan seek)
+  seekOnSelect: boolean;
   setProject: (p: any) => void;
   setClip: (c: any) => void;
   setKeyframes: (k: Keyframe[]) => void;
@@ -23,6 +26,7 @@ interface EditorState {
   setIsPlaying: (p: boolean) => void;
   setSelectedTab: (t: "crop" | "script" | "effect") => void;
   setVideoRef: (r: { current: HTMLVideoElement | null }) => void;
+  setSeekOnSelect: (v: boolean) => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -34,6 +38,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   isPlaying: false,
   selectedTab: "crop",
   videoRef: null,
+  seekOnSelect: true,
   setProject: (p) => set({ project: p }),
   setClip: (c) => set({ clip: c }),
   setKeyframes: (k) => set({ keyframes: k }),
@@ -41,4 +46,5 @@ export const useEditorStore = create<EditorState>((set) => ({
   setIsPlaying: (p) => set({ isPlaying: p }),
   setSelectedTab: (t) => set({ selectedTab: t }),
   setVideoRef: (r) => set({ videoRef: r }),
+  setSeekOnSelect: (v) => set({ seekOnSelect: v }),
 }));

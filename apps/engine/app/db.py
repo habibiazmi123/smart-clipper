@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS crop_keyframes (
     center_x REAL NOT NULL,
     center_y REAL NOT NULL,
     source TEXT DEFAULT 'ai',
+    speaker TEXT DEFAULT NULL,
     FOREIGN KEY (clip_id) REFERENCES clips(id)
 );
 CREATE TABLE IF NOT EXISTS captions (
@@ -130,6 +131,13 @@ CREATE TABLE IF NOT EXISTS render_jobs (
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    # ponytail: migrasi ringan untuk DB lama (kolom baru nullable)
+    for stmt in ("ALTER TABLE crop_keyframes ADD COLUMN speaker TEXT DEFAULT NULL",):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
     conn.commit()
 
 
@@ -235,18 +243,18 @@ def insert_hook_candidate(conn: sqlite3.Connection, **kw) -> object:
 
 def insert_crop_keyframes(conn: sqlite3.Connection, clip_id: str, keyframes: list[dict], source: str = "ai") -> None:
     conn.executemany(
-        "INSERT INTO crop_keyframes (clip_id,time,center_x,center_y,source) VALUES (?,?,?,?,?)",
-        [(clip_id, kf["time"], kf["center_x"], kf["center_y"], source) for kf in keyframes],
+        "INSERT INTO crop_keyframes (clip_id,time,center_x,center_y,source,speaker) VALUES (?,?,?,?,?,?)",
+        [(clip_id, kf["time"], kf["center_x"], kf["center_y"], source, kf.get("speaker")) for kf in keyframes],
     )
     conn.commit()
 
 
 def get_crop_keyframes(conn: sqlite3.Connection, clip_id: str) -> list[dict]:
     rows = conn.execute(
-        "SELECT time,center_x,center_y,source FROM crop_keyframes WHERE clip_id=? ORDER BY time",
+        "SELECT time,center_x,center_y,source,speaker FROM crop_keyframes WHERE clip_id=? ORDER BY time",
         (clip_id,),
     ).fetchall()
-    return [{"time": r[0], "center_x": r[1], "center_y": r[2], "source": r[3]} for r in rows]
+    return [{"time": r[0], "center_x": r[1], "center_y": r[2], "source": r[3], "speaker": r[4]} for r in rows]
 
 
 def delete_manual_crop_keyframes(conn: sqlite3.Connection, clip_id: str) -> None:

@@ -25,10 +25,21 @@ class Settings:
         "context_completeness": 0.10,
         "llm_score": 0.05,
     })
-    SMOOTHING_ALPHA: float = 0.15
-    SMOOTHING_DEADZONE: float = 0.02
+    SMOOTHING_ALPHA: float = 0.35
+    # ponytail: 0.15 butuh ~10 sampel untuk konvergen (rect ketinggalan wajah);
+    # 0.35 konvergen ~4 sampel, detector cukup stabil sehingga tetap halus.
+    # deadzone 0.02 membekukan pan pelan (0.50->0.62 tidak gerak); 0.005 cukup lawan jitter
+    SMOOTHING_DEADZONE: float = 0.005
     KEYFRAME_INTERVAL: float = 0.5
     FACE_SAMPLE_INTERVAL: float = 0.1  # every ~3rd frame at 30fps
+    # active speaker v1 (PRD): hysteresis agar tanggapan singkat tidak switch
+    SPEAKER_SWITCH_MARGIN: float = 0.15
+    SPEAKER_MIN_DWELL_SEC: float = 1.5  # challenger unggul selama ini baru switch
+    SPEAKER_HOLD_SEC: float = 1.0  # wajah hilang sesaat -> tahan framing
+    SPEAKER_SILENCE_RMS: float = 0.03  # kalibrasi: speech 0.09-0.18, sunyi 0.0
+    SPEAKER_MOUTH_ALPHA: float = 0.4
+    SPEAKER_IOU_THRESHOLD: float = 0.3
+    SPEAKER_MOUTH_DT: float = 0.12  # pasang frame pembanding untuk mouth-motion
 
 
 settings = Settings()
