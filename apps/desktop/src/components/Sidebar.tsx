@@ -1,12 +1,38 @@
 import { useEditorStore } from "../stores/editor";
+import { getClip } from "../lib/api";
 
 export default function Sidebar() {
-  const { selectedTab, setSelectedTab, keyframes, clip } = useEditorStore();
+  const { selectedTab, setSelectedTab, keyframes, clip, project, setClip, setKeyframes } = useEditorStore();
 
   const tabs = ["crop", "script", "effect"] as const;
 
+  const selectClip = async (clipId: string) => {
+    try {
+      const c = await getClip(clipId);
+      setClip(c);
+      setKeyframes(c.keyframes || []);
+    } catch {}
+  };
+
   return (
     <div style={{ width: 320, background: "var(--surface)", borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column" }}>
+      {project?.clips?.length > 1 && (
+        <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--border)" }}>
+          <h3 style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 4 }}>Clips</h3>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {project.clips.map((c: any, i: number) => (
+              <button
+                key={c.id}
+                className={`btn ${clip?.id === c.id ? "primary" : ""}`}
+                style={{ fontSize: 11, padding: "2px 8px" }}
+                onClick={() => selectClip(c.id)}
+              >
+                {i + 1}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", borderBottom: "1px solid var(--border)" }}>
         {tabs.map((t) => (
           <button

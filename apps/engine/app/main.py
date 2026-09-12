@@ -14,6 +14,21 @@ app.include_router(projects.router, prefix="/api")
 app.include_router(clips.router, prefix="/api")
 app.include_router(jobs_api.router, prefix="/api")
 
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/media/{pid}/video")
+def serve_video(pid: str):
+    from fastapi import HTTPException
+    pdir = settings.DATA_ROOT / "projects" / pid / "source"
+    videos = list(pdir.glob("*.mp4"))
+    if not videos:
+        raise HTTPException(404, "No video found")
+    return FileResponse(str(videos[0]), media_type="video/mp4")
+
+
 # serve frontend build with SPA fallback
 frontend_dist = Path(__file__).parent.parent.parent / "desktop" / "dist"
 if frontend_dist.exists():
@@ -34,8 +49,3 @@ def startup():
     conn = sqlite3.connect(str(db_path))
     init_db(conn)
     conn.close()
-
-
-@app.get("/api/health")
-def health():
-    return {"status": "ok"}
