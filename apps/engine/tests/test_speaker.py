@@ -82,6 +82,29 @@ def test_no_faces_returns_none():
     assert tr.update([], {}, True, 0.0) is None
 
 
+def test_long_absence_holds_last_crop_not_center(tmp_path, monkeypatch):
+    """Wajah hilang lama (shot lebar profil) -> fallback = posisi terakhir
+    (PRD: previous crop sebelum center), bukan 0.5 tengah yang kosong."""
+    import cv2
+    import numpy as np
+    from app.services import speaker_service
+    vp = str(tmp_path / "t.mp4")
+    w = cv2.VideoWriter(vp, cv2.VideoWriter_fourcc(*"mp4v"), 30, (320, 240))
+    for _ in range(90):  # 3 detik
+        w.write(np.zeros((240, 320, 3), np.uint8))
+    w.release()
+    face = {"x": 0.3, "y": 0.4, "w": 0.15, "h": 0.3, "confidence": 0.9}
+    import app.providers.face_provider as fp
+    monkeypatch.setattr(fp, "detect_faces_frame",
+                        lambda det, rgb, t: [face] if t < 1.0 else [])
+    out = speaker_service.analyze_clip_speakers(vp, object(), 0.0, 3.0,
+                                                sample_interval=0.5)
+    assert out, "harus ada sampel"
+    tail = [s for s in out if s["speaker"] is None]
+    assert tail, "harus ada sampel tanpa wajah"
+    assert all(abs(s["cx"] - 0.3) < 0.05 for s in tail), tail
+
+
 def test_fast_move_keeps_id_via_centroid():
     """Lompatan cepat (IoU putus) tapi centroid dekat -> id sama, tidak switch."""
     tr = SpeakerTracker()

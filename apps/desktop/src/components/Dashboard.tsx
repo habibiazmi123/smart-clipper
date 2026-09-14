@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { listProjects, createProject, analyzeProject } from "../lib/api";
+import { listProjects, createProject, uploadProjectFile, analyzeProject, deleteProject } from "../lib/api";
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<any[]>([]);
+  const [mode, setMode] = useState<"url" | "file">("url");
   const [url, setUrl] = useState("");
-  const [name, setName] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [numClips, setNumClips] = useState(3);
   const [maxDuration, setMaxDuration] = useState(60);
   const [aspectRatio, setAspectRatio] = useState("9:16");
@@ -16,16 +17,39 @@ export default function Dashboard() {
     listProjects().then(setProjects).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!projects.some((p) => p.status !== "ready" && p.status !== "failed")) return;
+    const iv = setInterval(() => listProjects().then(setProjects).catch(() => {}), 2000);
+    return () => clearInterval(iv);
+  }, [projects]);
+
   const handleCreate = async () => {
-    if (!url.trim() || busy) return;
+    if (busy) return;
     setBusy(true);
     try {
-      const p = await createProject(name || "Untitled", url);
-      analyzeProject(p.id, numClips, maxDuration, aspectRatio);
-      navigate(`/editor/${p.id}`);
+      if (mode === "file") {
+        if (!file) return;
+        const p = await createProject("", file.name);
+        await uploadProjectFile(p.id, file);
+        analyzeProject(p.id, numClips, maxDuration, aspectRatio);
+        navigate(`/editor/${p.id}`);
+      } else {
+        if (!url.trim()) return;
+        const p = await createProject("", url);
+        analyzeProject(p.id, numClips, maxDuration, aspectRatio);
+        navigate(`/editor/${p.id}`);
+      }
     } finally {
       setBusy(false);
     }
+  };
+  const canSubmit = mode === "file" ? !!file : !!url.trim();
+
+  const handleDelete = async (e: React.MouseEvent, pid: string) => {
+    e.stopPropagation();
+    if (!confirm("Hapus project ini beserta semua data?")) return;
+    await deleteProject(pid).catch(() => {});
+    setProjects((prev) => prev.filter((p) => p.id !== pid));
   };
 
   return (
@@ -54,25 +78,32 @@ export default function Dashboard() {
               Download → transcribe → detect hooks → smart 9:16 crop → captions. All on-device.
             </p>
             <div style={{ display: "grid", gap: 10 }}>
-              <input
-                className="field"
-                placeholder="Project name (optional)"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                aria-label="Project name"
-              />
+              <div style={{ display: "flex", gap: 8 }}>
+                {(["url", "file"] as const).map((m) => (
+                  <button
+                    key={m}
+                    className="btn"
+                    onClick={() => setMode(m)}
+                    aria-pressed={mode === m}
+                    style={mode === m ? {} : { opacity: 0.55 }}
+                  >
+                    {m === "url" ? "YouTube URL" : "Upload file"}
+                  </button>
+                ))}
+              </div>
+              {mode === "url" ? (
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <input
                   className="field"
                   style={{ flex: "1 1 260px" }}
-                  placeholder="YouTube URL or local video path"
+                  placeholder="YouTube URL"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleCreate()}
                   aria-label="Video source"
                   inputMode="url"
                 />
-                <button className="btn primary" onClick={handleCreate} disabled={!url.trim() || busy} style={{ minHeight: 42 }}>
+                <button className="btn primary" onClick={handleCreate} disabled={!canSubmit || busy} style={{ minHeight: 42 }}>
                   {busy ? "Creating…" : (
                     <>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M8 5v14l11-7z" /></svg>
@@ -81,6 +112,28 @@ export default function Dashboard() {
                   )}
                 </button>
               </div>
+              ) : (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <label className="field" style={{ flex: "1 1 260px", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {file ? file.name : "Pilih file video…"}
+                  <input
+                    type="file"
+                    accept="video/*,.mp4,.mov,.mkv,.webm"
+                    hidden
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    aria-label="Video file"
+                  />
+                </label>
+                <button className="btn primary" onClick={handleCreate} disabled={!canSubmit || busy} style={{ minHeight: 42 }}>
+                  {busy ? "Uploading…" : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M8 5v14l11-7z" /></svg>
+                      Upload & Analyze
+                    </>
+                  )}
+                </button>
+              </div>
+              )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
                   <span style={{ color: "var(--text-dim)" }}>Clips</span>
@@ -118,14 +171,28 @@ export default function Dashboard() {
           <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
             {projects.map((p) => (
               <article key={p.id} className="card hoverable" onClick={() => navigate(`/editor/${p.id}`)} tabIndex={0}
-                onKeyDown={(e) => e.key === "Enter" && navigate(`/editor/${p.id}`)} aria-label={`Open ${p.name}`}>
+                onKeyDown={(e) => e.key === "Enter" && navigate(`/editor/${p.id}`)} aria-label={`Open ${p.name}`}
+                style={{ position: "relative" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
                   <h3 style={{ fontSize: 14, fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</h3>
-          <span className={`status-pill ${p.status === "ready" ? "ready" : "processing"}`}>
-            <span className="dot" aria-hidden />{p.status === "cropping" ? "Potong clip…" : p.status}
-          </span>
+                  <span className={`status-pill ${p.status === "ready" ? "ready" : "processing"}`}>
+                    <span className="dot" aria-hidden />{p.status === "cropping" ? "Potong clip…" : (p as any).stage || p.status}
+                  </span>
                 </div>
+                {(p as any).progress > 0 && p.status !== "ready" && (
+                  <div style={{ height: 4, background: "#1a1d2e", borderRadius: 2, overflow: "hidden", marginBottom: 6, border: "1px solid #2a2f4a" }}>
+                    <div style={{ height: "100%", width: `${Math.round(((p as any).progress ?? 0) * 100)}%`, background: "#8b5cf6", transition: "width 0.6s" }} />
+                  </div>
+                )}
                 <p style={{ fontSize: 11.5, color: "var(--text-faint)", fontFamily: "ui-monospace,monospace", overflow: "hidden", textOverflow: "ellipsis" }}>{p.id}</p>
+                <button
+                  onClick={(e) => handleDelete(e, p.id)}
+                  title="Hapus project"
+                  aria-label={`Delete ${p.name}`}
+                  style={{ position: "absolute", top: 8, right: 8, width: 26, height: 26, borderRadius: 6, border: "1px solid #3a2a2a", background: "rgba(239,68,68,.12)", color: "#f87171", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                </button>
               </article>
             ))}
           </div>

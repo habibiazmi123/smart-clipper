@@ -156,12 +156,12 @@ export default function Timeline() {
         <div style={{ position: "relative", height: 10, marginTop: 4 }}>
           {dots.map((kf, i) => {
             const prev = i > 0 ? dots[i - 1] : null;
-            // tick putih hanya untuk pindah orang beneran (posisi loncat),
-            // bukan ganti label di wajah yang sama
-            const switched = kf.speaker && prev?.speaker && kf.speaker !== prev.speaker
-              && Math.abs(kf.center_x - (prev?.center_x ?? kf.center_x)) > 0.05;
+            // tick putih = CUT beneran (posisi loncat + ganti orang/center),
+            // bukan ganti label di wajah yang sama. Mirror _is_switch backend.
+            const switched = !!prev && kf.speaker !== prev.speaker
+              && Math.abs(kf.center_x - prev.center_x) > 0.05;
             return (
-            <div key={i} title={`${fmt(kf.time)}${kf.speaker ? ` · ${kf.speaker}` : ""}`} style={{ position: "absolute", left: `${((kf.time - clip.source_start) / Math.max(dur, 0.001)) * 100}%`, top: switched ? 0 : 2, width: switched ? 3 : 6, height: switched ? 10 : 6, borderRadius: switched ? 2 : "50%", background: switched ? "#fff" : kf.speaker ? speakerColor(kf.speaker) : kf.source === "ai" ? "#8b5cf6" : "#f59e0b", transform: "translateX(-50%)" }} />
+            <div key={i} title={`${fmt(kf.time)}${kf.speaker ? ` · ${kf.speaker}` : " · center (tanpa wajah)"}`} style={{ position: "absolute", left: `${((kf.time - clip.source_start) / Math.max(dur, 0.001)) * 100}%`, top: switched ? 0 : 2, width: switched ? 3 : 6, height: switched ? 10 : 6, borderRadius: switched ? 2 : "50%", background: switched ? "#fff" : kf.speaker ? speakerColor(kf.speaker) : kf.source === "manual" ? "#f59e0b" : "#6b7280", transform: "translateX(-50%)" }} />
             );
           })}
         </div>

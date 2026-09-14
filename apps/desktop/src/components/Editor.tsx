@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { getProject, getClip, getCaptions, scheduleAutoRender, exportCurrentClipWithProgress, cancelCurrentExport } from "../lib/api";
+import { getProject, getClip, getCaptions, scheduleAutoRender, exportCurrentClipWithProgress, cancelCurrentExport, deleteProject } from "../lib/api";
 import { dominantSpeaker } from "../lib/speakers";
 import { useEditorStore } from "../stores/editor";
 import VideoPlayer from "./VideoPlayer";
@@ -26,6 +26,17 @@ export default function Editor() {
     if (!projectId) return;
     getProject(projectId).then(setProject).catch(() => navigate("/"));
   }, [projectId]);
+
+  // poll project status saat masih processing
+  useEffect(() => {
+    if (!projectId || !project) return;
+    const s = project.status;
+    if (s === "ready" || s === "failed") return;
+    const iv = setInterval(() => {
+      getProject(projectId).then(setProject).catch(() => {});
+    }, 1500);
+    return () => clearInterval(iv);
+  }, [projectId, project?.status]);
 
   // meta per-segmen (avg crop + speaker dominan) untuk warna timeline/sidebar
   useEffect(() => {
@@ -85,10 +96,25 @@ export default function Editor() {
         </button>
         <span aria-hidden style={{ width: 1, height: 20, background: "var(--border-strong)" }} />
         <h1>{project?.name || "Loading..."}</h1>
-        <span className={`status-pill ${project?.status === "ready" ? "ready" : "processing"}`}>
-          <span className="dot" aria-hidden />
-          {project?.status === "ready" ? "Edited" : project?.status === "processing" ? "Processing" : project?.status || "…"}
-        </span>
+        {project && project.status !== "ready" ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 200 }}>
+            <span className="status-pill processing">
+              <span className="dot" aria-hidden />
+              {project.stage || project.status}
+            </span>
+            <div style={{ flex: 1, height: 6, background: "#1a1d2e", borderRadius: 3, overflow: "hidden", border: "1px solid #2a2f4a" }}>
+              <div style={{ height: "100%", width: `${Math.round((project.progress ?? 0) * 100)}%`, background: "#8b5cf6", transition: "width 0.6s" }} />
+            </div>
+            <span className="tabular" style={{ fontSize: 11, color: "var(--text-dim)", minWidth: 36 }}>
+              {Math.round((project.progress ?? 0) * 100)}%
+            </span>
+          </div>
+        ) : (
+          <span className={`status-pill ${project?.status === "ready" ? "ready" : "processing"}`}>
+            <span className="dot" aria-hidden />
+            Edited
+          </span>
+        )}
         <span className="top-meta tabular">{project?.clips?.length || 0} segments{typeof project?.duration === "number" ? ` · ${Math.round(project.duration)}s` : ""}</span>
         <div style={{ flex: 1 }} />
         {exporting && (
@@ -102,6 +128,18 @@ export default function Editor() {
         <button className="btn sm" disabled={!clip || exporting} onClick={() => exportCurrentClipWithProgress(true)}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" x2="12" y1="15" y2="3" /></svg>
           {exporting ? `Rendering ${exportProgress != null ? Math.round(exportProgress * 100) + "%" : ""}` : "Export"}</button>
+        <button
+          className="btn sm" title="Hapus project" aria-label="Delete project"
+          style={{ color: "#f87171", borderColor: "#3a2a2a" }}
+          onClick={async () => {
+            if (!projectId || !confirm("Hapus project ini beserta semua data?")) return;
+            await deleteProject(projectId).catch(() => {});
+            navigate("/");
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+          Delete
+        </button>
         <button className="btn primary sm">Save</button>
       </div>
       <div className="editor-shell">

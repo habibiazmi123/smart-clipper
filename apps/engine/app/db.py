@@ -133,11 +133,13 @@ CREATE TABLE IF NOT EXISTS render_jobs (
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
-    # ponytail: migrasi ringan untuk DB lama (kolom baru nullable)
     for stmt in (
         "ALTER TABLE crop_keyframes ADD COLUMN speaker TEXT DEFAULT NULL",
         "ALTER TABLE hook_candidates ADD COLUMN source TEXT DEFAULT 'groq'",
         "ALTER TABLE hook_candidates ADD COLUMN llm_model TEXT DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN progress REAL DEFAULT 0",
+        "ALTER TABLE projects ADD COLUMN stage TEXT DEFAULT ''",
+        "ALTER TABLE projects ADD COLUMN error TEXT DEFAULT ''",
     ):
         try:
             conn.execute(stmt)
@@ -166,8 +168,15 @@ def get_project(conn: sqlite3.Connection, project_id: str):
     row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
     if not row:
         return None
+    cols = [d[0] for d in conn.execute("SELECT * FROM projects LIMIT 0").description]
+    m = dict(zip(cols, row))
     return Project(
-        id=row[0], name=row[1], source_url=row[2], status=row[3], created_at=row[4], updated_at=row[5]
+        id=m["id"], name=m["name"], source_url=m.get("source_url", ""),
+        status=m.get("status", "importing"),
+        progress=float(m.get("progress") or 0),
+        stage=m.get("stage") or "",
+        error=m.get("error") or "",
+        created_at=m.get("created_at", ""), updated_at=m.get("updated_at", ""),
     )
 
 

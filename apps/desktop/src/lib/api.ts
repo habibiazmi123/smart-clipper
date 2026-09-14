@@ -16,8 +16,20 @@ export async function createProject(name: string, url: string) {
   });
 }
 
+export async function uploadProjectFile(id: string, file: File) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${BASE}/projects/${id}/upload`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function listProjects() {
   return fetchJSON("/projects");
+}
+
+export async function deleteProject(id: string) {
+  return fetchJSON(`/projects/${id}`, { method: "DELETE" });
 }
 
 export async function getProject(id: string) {

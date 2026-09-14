@@ -22,7 +22,7 @@ def _get_conn():
     return sqlite3.connect(str(settings.DATA_ROOT / "smartclipper.db"))
 
 
-def create_clips_for_hooks(conn, pid: str, hook_ids: list[str], aspect_ratio: str = "9:16") -> list[dict]:
+def create_clips_for_hooks(conn, pid: str, hook_ids: list[str], aspect_ratio: str = "9:16", on_progress=None) -> list[dict]:
     placeholders = ",".join("?" for _ in hook_ids)
     rows = conn.execute(
         f"SELECT id,start,end FROM hook_candidates WHERE project_id=? AND id IN ({placeholders})",
@@ -68,55 +68,104 @@ def create_clips_for_hooks(conn, pid: str, hook_ids: list[str], aspect_ratio: st
     t0 = time.time()
     created = []
     for idx, (hid, hs, he) in enumerate(ordered):
+        if on_progress:
+            try: on_progress(idx, len(ordered))
+            except Exception: pass
         log.info("[from_hooks] pid=%s clip %d/%d hook=%s [%.1f-%.1f]", pid, idx + 1, len(ordered), hid, hs, he)
-        clip_id = uuid.uuid4().hex[:10]
-        insert_clip(conn, id=clip_id, project_id=pid, hook_candidate_id=hid,
-                    source_start=hs, source_end=he, aspect_ratio=aspect_ratio)
-        centers = analyze_clip_speakers(
-            video_path, detector, hs, he, wav=wav,
-            transcript_segs=transcript_segs, tracker=tracker)
-        from app.services.vision_service import smooth_centers, interpolate_centers
-        if centers:
-            smoothed = smooth_centers([{"time": c["time"], "cx": c["cx"]} for c in centers])
-            keyframes = []
-            for kf in interpolate_centers(smoothed):
-                near = min(centers, key=lambda c: abs(c["time"] - kf["time"]))
-                keyframes.append({**kf, "speaker": near.get("speaker"), "sconf": near.get("sconf")})
-            if keyframes and keyframes[0]["time"] > hs:
-                first = keyframes[0]
-                keyframes.insert(0, {"time": round(hs, 3), "cx": first["cx"],
-                                     "cy": first.get("cy", 0.5),
-                                     "speaker": first.get("speaker"), "sconf": first.get("sconf")})
-            if keyframes and keyframes[-1]["time"] < he:
-                last = keyframes[-1]
-                keyframes.append({"time": round(he, 3), "cx": last["cx"],
-                                  "cy": last.get("cy", 0.5),
-                                  "speaker": last.get("speaker"), "sconf": last.get("sconf")})
-        else:
-            keyframes = [{"time": hs, "cx": 0.5, "cy": 0.5}]
-        from app.domain.crop import centers_to_keyframes
-        crop_kfs = centers_to_keyframes(
-            [{"time": kf["time"], "cx": kf["cx"], "cy": kf.get("cy", 0.5),
-              "speaker": kf.get("speaker")} for kf in keyframes],
-            meta["width"], meta["height"], aspect_ratio)
-        insert_crop_keyframes(conn, clip_id, crop_kfs, source="ai")
-        clip_segs = [s for s in transcript_segs if s["end"] > hs and s["start"] < he]
-        from app.domain.captions import split_words_to_lines, generate_ass
-        all_words = []
-        for s in clip_segs:
-            try:
-                ws = json.loads(s.get("words_json", "[]"))
-            except Exception:
-                ws = []
-            all_words.extend(ws)
-        lines = split_words_to_lines(all_words, max_chars=30, max_lines=2)
-        ass_content = generate_ass(lines, meta["width"], meta["height"])
-        ass_path = pdir / "exports" / f"{clip_id}.ass"
-        ass_path.parent.mkdir(parents=True, exist_ok=True)
-        ass_path.write_text(ass_content)
-        insert_caption(conn, clip_id, 0, hs, he, " ".join(l["text"] for l in lines))
-        created.append({"id": clip_id, "start": hs, "end": he, "hook_id": hid})
+        try:
+            clip_id = uuid.uuid4().hex[:10]
+            insert_clip(conn, id=clip_id, project_id=pid, hook_candidate_id=hid,
+                        source_start=hs, source_end=he, aspect_ratio=aspect_ratio)
+            centers = analyze_clip_speakers(
+                video_path, detector, hs, he, wav=wav,
+                transcript_segs=transcript_segs, tracker=tracker)
+            def _smooth_by_speaker(centers):
+                """Smooth cx independently per speaker segment. Between segments = cut, no slide."""
+                if not centers:
+                    return []
+                segments = []
+                cur = [centers[0]]
+                for c in centers[1:]:
+                    if c.get("speaker") == cur[-1].get("speaker"):
+                        cur.append(c)
+                    else:
+                        segments.append(cur)
+                        cur = [c]
+                segments.append(cur)
+                result = []
+                for seg in segments:
+                    if len(seg) <= 1:
+                        result.extend(seg)
+                        continue
+                    raw = [{"time": s["time"], "cx": s["cx"]} for s in seg]
+                    smoothed = smooth_centers(raw)
+                    for i, s in enumerate(seg):
+                        result.append({**s, "cx": smoothed[i]["cx"]})
+                return result
 
+            def _dedup_by_cx_and_speaker(kfs):
+                if not kfs:
+                    return kfs
+                out = [kfs[0]]
+                for k in kfs[1:]:
+                    if k.get("speaker") == out[-1].get("speaker") and abs(k["cx"] - out[-1]["cx"]) < 0.02:
+                        continue
+                    out.append(k)
+                return out
+
+            from app.services.vision_service import smooth_centers, interpolate_centers
+            if centers:
+                smoothed = _smooth_by_speaker(centers)
+                keyframes = []
+                for kf in interpolate_centers(smoothed):
+                    near = min(centers, key=lambda c: abs(c["time"] - kf["time"]))
+                    keyframes.append({**kf, "speaker": near.get("speaker"), "sconf": near.get("sconf")})
+                keyframes = _dedup_by_cx_and_speaker(keyframes)
+                if keyframes and keyframes[0]["time"] > hs:
+                    first = keyframes[0]
+                    keyframes.insert(0, {"time": round(hs, 3), "cx": first["cx"],
+                                         "cy": first.get("cy", 0.5),
+                                         "speaker": first.get("speaker"), "sconf": first.get("sconf")})
+                if keyframes and keyframes[-1]["time"] < he:
+                    last = keyframes[-1]
+                    keyframes.append({"time": round(he, 3), "cx": last["cx"],
+                                      "cy": last.get("cy", 0.5),
+                                      "speaker": last.get("speaker"), "sconf": last.get("sconf")})
+            else:
+                keyframes = [{"time": hs, "cx": 0.5, "cy": 0.5}]
+            from app.domain.crop import centers_to_keyframes
+            crop_kfs = centers_to_keyframes(
+                [{"time": kf["time"], "cx": kf["cx"], "cy": kf.get("cy", 0.5),
+                  "speaker": kf.get("speaker")} for kf in keyframes],
+                meta["width"], meta["height"], aspect_ratio)
+            insert_crop_keyframes(conn, clip_id, crop_kfs, source="ai")
+            clip_segs = [s for s in transcript_segs if s["end"] > hs and s["start"] < he]
+            from app.domain.captions import split_words_to_lines, generate_ass
+            all_words = []
+            for s in clip_segs:
+                try:
+                    ws = json.loads(s.get("words_json", "[]"))
+                except Exception:
+                    ws = []
+                all_words.extend(ws)
+            lines = split_words_to_lines(all_words, max_chars=30, max_lines=2)
+            ass_content = generate_ass(lines, meta["width"], meta["height"])
+            ass_path = pdir / "exports" / f"{clip_id}.ass"
+            ass_path.parent.mkdir(parents=True, exist_ok=True)
+            ass_path.write_text(ass_content)
+            insert_caption(conn, clip_id, 0, hs, he, " ".join(l["text"] for l in lines))
+            created.append({"id": clip_id, "start": hs, "end": he, "hook_id": hid})
+            conn.commit()
+        except Exception as e:
+            log.warning("[from_hooks] pid=%s hook=%s failed: %s", pid, hid, e, exc_info=True)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+    if on_progress:
+        try: on_progress(len(ordered), len(ordered))
+        except Exception: pass
     log.info("[from_hooks] pid=%s done clips=%d took=%.1fs", pid, len(created), time.time() - t0)
     try:
         detector.close()

@@ -90,12 +90,17 @@ def build_crop_expr(keyframes: list[dict], src_w: int, src_h: int, aspect_w: int
 
 
 def _is_switch(a: dict, b: dict) -> bool:
-    """True jika dua keyframe berurutan beda pembicara (keduanya berlabel).
-
-    Keyframe manual (tanpa label) = wildcard, tetap glide halus.
+    """True jika harus CUT (bukan glide): beda speaker, atau salah satu
+    adalah pusat/tanpa-orang (None). Glide hanya antar titik speaker sama.
+    Manual-edited tanpa label = wildcard tetap glide untuk koreksi halus.
     """
     sa, sb = a.get("speaker"), b.get("speaker")
-    return bool(sa and sb and sa != sb)
+    # None = pusat/tanpa orang -> selalu cut, jangan sliding dari tengah
+    if sa is None or sb is None:
+        if a.get("source") == "manual" or b.get("source") == "manual":
+            return False
+        return True
+    return sa != sb
 
 
 def keypoints_for_clip(keyframes: list[dict], src_w: int, src_h: int, aspect: str) -> list[dict]:

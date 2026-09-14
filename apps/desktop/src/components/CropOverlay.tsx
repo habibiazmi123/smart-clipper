@@ -7,7 +7,9 @@ import { speakerColor } from "../lib/speakers";
 // Ganti orang = CUT (tahan posisi lama sampai batas keyframe), glide
 // hanya untuk gerakan orang yang sama. Mirror build_crop_expr backend.
 function isSwitch(a: any, b: any): boolean {
-  return !!(a?.speaker && b?.speaker && a.speaker !== b.speaker);
+  if (a?.source === "manual" || b?.source === "manual") return false;
+  if (a?.speaker == null || b?.speaker == null) return true;
+  return a.speaker !== b.speaker;
 }
 
 export function interpolateKeyframes(kfs: any[], t: number) {

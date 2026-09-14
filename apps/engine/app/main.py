@@ -26,11 +26,12 @@ def health():
 @app.get("/api/media/{pid}/video")
 def serve_video(pid: str):
     from fastapi import HTTPException
+    from app.config import settings
     pdir = settings.DATA_ROOT / "projects" / pid / "source"
-    videos = list(pdir.glob("*.mp4"))
+    videos = [f for ext in settings.VIDEO_EXTENSIONS for f in pdir.glob(f"*{ext}")]
     if not videos:
         raise HTTPException(404, "No video found")
-    return FileResponse(str(videos[0]), media_type="video/mp4")
+    return FileResponse(str(videos[0]))
 
 
 # serve frontend build with SPA fallback

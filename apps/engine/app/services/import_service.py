@@ -33,6 +33,20 @@ def extract_metadata(video_path: str) -> dict:
     }
 
 
+def fetch_youtube_title(url: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["yt-dlp", "--no-download", "--print", "%(title)s", url],
+            capture_output=True, text=True, timeout=15,
+        )
+        title = result.stdout.strip()
+        if title and result.returncode == 0:
+            return title
+    except Exception:
+        pass
+    return None
+
+
 def download_video(project_id: str, url: str, project_dir: Path, on_progress=None) -> Path:
     import uuid
     log.info("[download] pid=%s starting url=%s", project_id, url)

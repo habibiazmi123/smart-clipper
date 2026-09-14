@@ -252,8 +252,16 @@ def analyze_clip_speakers(video_path: str, detector, start: float, end: float,
         if r:
             out.append({"time": r["time"], "cx": r["cx"], "cy": r["cy"],
                         "speaker": r["speaker"], "sconf": r["confidence"]})
+        else:
+            # ponytail: PRD fallback = previous crop sebelum center crop;
+            # tengah frame shot lebar dua orang = ruang kosong, tahan posisi
+            # terakhir agar tidak loncat ke tengah saat wajah hilang lama
+            out.append({"time": round(t, 3), "cx": tracker.last_pos["cx"], "cy": tracker.last_pos["cy"],
+                        "speaker": None, "sconf": 0.0})
         t += interval
     cap.release()
     log.info("[crop] clip [%.1f-%.1f] done samples=%d speakers=%s took=%.1fs",
-             start, end, len(out), sorted(set(x["speaker"] for x in out)), time.time() - t0)
+             start, end, len(out),
+             sorted(s for s in set(x["speaker"] for x in out) if s is not None),
+             time.time() - t0)
     return out

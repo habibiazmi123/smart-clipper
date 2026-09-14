@@ -10,6 +10,9 @@ class Project:
     name: str
     source_url: str = ""
     status: str = "importing"
+    progress: float = 0.0
+    stage: str = ""
+    error: str = ""
     created_at: str = ""
     updated_at: str = ""
 
