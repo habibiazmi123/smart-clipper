@@ -260,7 +260,7 @@ def insert_hook_candidate(conn: sqlite3.Connection, **kw) -> object:
 def insert_crop_keyframes(conn: sqlite3.Connection, clip_id: str, keyframes: list[dict], source: str = "ai") -> None:
     conn.executemany(
         "INSERT INTO crop_keyframes (clip_id,time,center_x,center_y,source,speaker) VALUES (?,?,?,?,?,?)",
-        [(clip_id, kf["time"], kf["center_x"], kf["center_y"], source, kf.get("speaker")) for kf in keyframes],
+        [(clip_id, kf["time"], kf["center_x"], kf["center_y"], kf.get("source") or source, kf.get("speaker")) for kf in keyframes],
     )
     conn.commit()
 

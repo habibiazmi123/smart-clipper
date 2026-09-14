@@ -3,13 +3,15 @@ import { useEditorStore } from "../stores/editor";
 import { updateKeyframes, deleteKeyframe } from "../lib/api";
 import { speakerColor } from "../lib/speakers";
 
-// ponytail: linear interp, cukup untuk follow wajah saat play.
-// Ganti orang = CUT (tahan posisi lama sampai batas keyframe), glide
-// hanya untuk gerakan orang yang sama. Mirror build_crop_expr backend.
+// ponytail: hold lalu CUT antar wajah; glide hanya untuk gerakan kecil
+// orang yang sama / koreksi manual halus. Lompatan besar = CUT agar
+// frame tidak kehilangan wajah. Mirror _is_switch backend.
 function isSwitch(a: any, b: any): boolean {
-  if (a?.source === "manual" || b?.source === "manual") return false;
+  const dx = Math.abs((a?.center_x ?? 0.5) - (b?.center_x ?? 0.5));
+  if (a?.source === "manual" || b?.source === "manual") return dx > 0.08;
   if (a?.speaker == null || b?.speaker == null) return true;
-  return a.speaker !== b.speaker;
+  if (a.speaker !== b.speaker) return true;
+  return dx > 0.08;
 }
 
 export function interpolateKeyframes(kfs: any[], t: number) {
@@ -97,22 +99,30 @@ export default function CropOverlay() {
 
   const upsert = useCallback((nx: number) => {
     const st = useEditorStore.getState();
-    const t = Math.round(st.currentTime * 100) / 100;
+    const tExact = st.currentTime;
+    const t = Math.round(tExact * 100) / 100;
     const HALF = cropNormW(1280, 720, st.clip?.aspect_ratio || "9:16") / 2;
     const clamped = Math.max(HALF, Math.min(1 - HALF, nx));
     let kfs = [...st.keyframes].sort((a, b) => a.time - b.time);
-    // cari keyframe terdekat (bukan first match) dengan threshold lebar
-    // agar drag di antara dua titik mengupdate yang paling dekat, bukan bikin baru
-    let bestIdx = -1, bestDist = 0.35;
+    // ponytail: threshold kecil (0.08s, sama seperti hapus/dedup) agar drag
+    // selalu menjepit keyframe TEPAT di waktu sekarang -> interpolasi di t
+    // == nilai drag, rectangle ngikutin mouse 1:1. Threshold lebar (0.35)
+    // malah menggeser keyframe tetangga yang 0.3s jauhnya: rect ketinggalan
+    // cursor (spongy) dan trajectory sekitar ikut ketarik.
+    let bestIdx = -1, bestDist = 0.08;
     for (let i = 0; i < kfs.length; i++) {
       const dist = Math.abs(Math.round(kfs[i].time * 100) / 100 - t);
       if (dist < bestDist) { bestDist = dist; bestIdx = i; }
     }
-    if (bestIdx >= 0) kfs[bestIdx] = { ...kfs[bestIdx], center_x: clamped, source: "manual" };
-    else kfs.push({ time: t, center_x: clamped, center_y: 0.5, source: "manual" });
+    // ponytail: keyframe koreksi WAJIB tepat di playhead (float penuh),
+    // bukan menempel di kf tetangga. Kalau nempel 0.08s di DEPAN playhead,
+    // interpolasi CUT menahan nilai lama di frame ini -> rect "rollback".
+    if (bestIdx >= 0) kfs[bestIdx] = { ...kfs[bestIdx], time: tExact, center_x: clamped, source: "manual" };
+    else kfs.push({ time: tExact, center_x: clamped, center_y: 0.5, source: "manual" });
     kfs = kfs.sort((a, b) => a.time - b.time).reduce((acc: any[], cur) => {
       const last = acc[acc.length - 1];
-      if (last && Math.round(last.time * 100) / 100 === Math.round(cur.time * 100) / 100) acc[acc.length - 1] = cur;
+      if (last && Math.round(last.time * 100) / 100 === Math.round(cur.time * 100) / 100)
+        acc[acc.length - 1] = cur.source === "manual" ? cur : (last.source === "manual" ? last : cur);
       else acc.push(cur);
       return acc;
     }, []);
@@ -129,6 +139,9 @@ export default function CropOverlay() {
 
   const onCropDown = (e: React.MouseEvent) => {
     e.stopPropagation();
+    // ponytail: pause saat mulai drag; kalau video jalan, `t` geser tiap
+    // mousemove -> drag malah menebar keyframe manual di sepanjang waktu.
+    useEditorStore.getState().videoRef?.current?.pause();
     drag.current = { startX: e.clientX, baseCx: cx };
     const onMove = (ev: MouseEvent) => {
       if (!drag.current || !boxRef.current) return;
@@ -149,6 +162,7 @@ export default function CropOverlay() {
   const onStageDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('[data-testid="smart-crop-rect"]')) return;
     e.preventDefault();
+    useEditorStore.getState().videoRef?.current?.pause();
     drag.current = { startX: e.clientX, baseCx: cx };
     const onMove = (ev: MouseEvent) => {
       if (!drag.current || !boxRef.current) return;

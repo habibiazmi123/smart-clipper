@@ -44,17 +44,23 @@ def _next_id(used: set) -> str:
     return f"A{n}"
 
 
-def mouth_energy(gray1: np.ndarray, gray2: np.ndarray, box: dict) -> float:
-    """Mean abs diff in lower-third of face box (mouth region heuristic)."""
+def mouth_energy(gray1: np.ndarray, gray2: np.ndarray, box: dict, baseline: float = 0.0) -> float:
+    """Mean abs diff in lower-third of face box (mouth region heuristic),
+    minus global-frame motion baseline. Tanpa baseline, anggukan pendengar
+    / goyangan kamera ikut terbaca sebagai 'berbicara' dan nyuri crop."""
     H, W = gray1.shape
-    x, y = int(box["x"] * W), int(box["y"] * H)
+    # ponytail: box x/y = TITIK TENGAH wajah (face_provider). Dulu dipakai
+    # langsung sebagai pojok kiri-atas -> ROI mulut geser setengah wajah
+    # ke kanan-bawah (sampel pipi/background, bukan mulut).
+    x, y = int((box["x"] - box["w"] / 2) * W), int((box["y"] - box["h"] / 2) * H)
     w, h = int(box["w"] * W), int(box["h"] * H)
     y0, y1 = max(y + 2 * h // 3, 0), y + h
     x0, x1 = max(x, 0), x + w
     r1, r2 = gray1[y0:y1, x0:x1], gray2[y0:y1, x0:x1]
     if r1.size == 0:
         return 0.0
-    return float(np.abs(r1.astype(np.int16) - r2.astype(np.int16)).mean())
+    raw = float(np.abs(r1.astype(np.int16) - r2.astype(np.int16)).mean())
+    return max(0.0, raw - baseline)
 
 
 def load_wav_mono(path: str) -> tuple[np.ndarray, int]:
@@ -135,6 +141,15 @@ class SpeakerTracker:
                     if d < best_dist:
                         best_dist, best_tid = d, tid
                 best_id = best_tid
+            # ponytail: POST-MATCH CUT DETECTION. Centroid fallback bisa
+            # salah match wajah B ke track A (jarak < 0.15) saat A dropout
+            # dan B muncul di posisi mirip. Kalau wajah yang match berpindah
+            # jauh dari posisi terakhir track-nya, itu CUT → buat ID baru.
+            if best_id is not None:
+                prev_tr = self.tracks[best_id]
+                jump = abs(f["x"] - prev_tr["x"]) + abs(f["y"] - prev_tr["y"])
+                if jump > 0.18:
+                    best_id = None  # force buat ID baru
             if best_id is None:
                 best_id = _next_id(self.used_ids)
                 self.used_ids.add(best_id)
@@ -148,6 +163,31 @@ class SpeakerTracker:
 
         visible = [assigned[i] for i in range(len(faces))]
         visible = list(dict.fromkeys(visible))  # duplikat deteksi -> satu id
+
+        # ponytail: INSTANT SWITCH untuk camera cut.
+        # Podcast/ interview punya cut cepat (1-2 detik). Tanpa ini,
+        # dwell 1.5s tidak pernah selesai → crop stuck di posisi lama
+        # sampai 1.2 detik setelah wajah baru muncul (glitch terlihat).
+        # Aturan: wajah baru yang TIDAK match ke track manapun (= orang baru)
+        # muncul di posisi jauh dari current speaker = CUT langsung.
+        # Kalau match ke existing track = dropout biasa, tahan.
+        pre_existing = set(self.tracks.keys())
+        if len(visible) == 1 and self.current is not None:
+            solo = visible[0]
+            solo_tr = self.tracks[solo]
+            if solo not in pre_existing:
+                cur_tr = self.tracks.get(self.current)
+                if cur_tr:
+                    jump = abs(solo_tr["x"] - cur_tr["x"]) + abs(solo_tr["y"] - cur_tr["y"])
+                else:
+                    jump = abs(solo_tr["x"] - self.last_pos["cx"]) + abs(solo_tr["y"] - self.last_pos["cy"])
+                if jump > 0.15:
+                    self.current = solo
+                    self.last_pos = {"cx": solo_tr["x"], "cy": solo_tr["y"]}
+                    self.misses = 0
+                    self.challenger, self.wins = None, 0
+                    return {"speaker": self.current, "cx": solo_tr["x"], "cy": solo_tr["y"],
+                            "confidence": 0.9, "time": round(t, 3)}
 
         # 2. score (mouth relative antar wajah yang terlihat)
         peak = max(self.tracks[tid]["mouth_ema"] for tid in visible)
@@ -164,6 +204,25 @@ class SpeakerTracker:
         # wajah hilang sesaat (dropout) -> tahan dulu, jangan loncat
         if self.current not in visible:
             self.misses += 1
+            # ponytail: INSTANT SWITCH saat current hilang + wajah lain jauh.
+            # Camera cut sering diikuti blackout (detector kehilangan semua wajah
+            # 0.5-1.5 detik). Saat wajah baru muncul, dwell tidak pernah selesai
+            # karena kita sudah melewati 'hold' window → crop stuck 1+ detik.
+            # Fix: kalau ada wajah terlihat DAN posisinya jauh dari posisi terakhir
+            # (= camera cut, bukan dropout sesaat), switch langsung.
+            # HANYA untuk wajah baru (bukan match existing track = dropout biasa).
+            if self.misses > self.hold and visible:
+                best = max(visible, key=lambda tid: scores[tid])
+                if best not in pre_existing:
+                    solo_tr = self.tracks[best]
+                    jump = abs(solo_tr["x"] - self.last_pos["cx"]) + abs(solo_tr["y"] - self.last_pos["cy"])
+                    if jump > 0.15:
+                        self.current = best
+                        self.last_pos = {"cx": solo_tr["x"], "cy": solo_tr["y"]}
+                        self.misses = 0
+                        self.challenger, self.wins = None, 0
+                        return {"speaker": self.current, "cx": solo_tr["x"], "cy": solo_tr["y"],
+                                "confidence": 0.9, "time": round(t, 3)}
             if self.misses <= self.hold and self.current is not None:
                 return {"speaker": self.current, "cx": self.last_pos["cx"],
                         "cy": self.last_pos["cy"], "confidence": 0.5,
@@ -227,22 +286,51 @@ def analyze_clip_speakers(video_path: str, detector, start: float, end: float,
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     if tracker is None:
         tracker = SpeakerTracker(sample_interval=interval)
+    from app.providers.face_provider import detect_faces_frame
+    # ponytail: SATU seek ke awal + baca berurutan. Sebelumnya 2x seek per
+    # sampel (t dan t+dt): lambat (decode-ulang dari keyframe tiap sampel)
+    # dan rapuh di file corrupt (seek mendarat di frame salah -> pasangan
+    # mouth ngaco -> speaker salah). Buffer kecil menyimpan gray terakhir
+    # untuk pasangan mouth (t vs t-dt, setara t vs t+dt untuk gerak mulut).
+    cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(start * fps)))
+    frame_idx = max(0, int(start * fps))
+    buf: list[tuple[float, np.ndarray]] = []  # (waktu_frame, gray)
+    keep = mouth_dt + interval + 1.0 / max(fps, 1.0)
     out = []
     t = start
     while t < end:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(t * fps))
-        ret1, f1 = cap.read()
-        if not ret1:
+        target = int(t * fps)
+        f1 = None
+        while True:
+            if frame_idx >= target:
+                ret, frm = cap.read()
+                if not ret:
+                    break
+                frame_idx += 1
+                g = cv2.cvtColor(frm, cv2.COLOR_BGR2GRAY)
+                buf.append((frame_idx / fps, g))
+                while len(buf) > 2 and buf[0][0] < t - keep:
+                    buf.pop(0)
+                f1 = frm
+                gray1 = g
+                break
+            ret, frm = cap.read()
+            if not ret:
+                break
+            frame_idx += 1
+            g = cv2.cvtColor(frm, cv2.COLOR_BGR2GRAY)
+            buf.append((frame_idx / fps, g))
+            while len(buf) > 2 and buf[0][0] < t - keep:
+                buf.pop(0)
+        if f1 is None:
             break
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int((t + mouth_dt) * fps))
-        ret2, f2 = cap.read()
-        if not ret2:
-            f2 = f1
-        from app.providers.face_provider import detect_faces_frame
-        gray1 = cv2.cvtColor(f1, cv2.COLOR_BGR2GRAY)
-        gray2 = cv2.cvtColor(f2, cv2.COLOR_BGR2GRAY)
+        # pasangan mouth: gray terdekat dengan t-dt dari buffer
+        gray2 = min(buf, key=lambda bg: abs(bg[0] - (t - mouth_dt)))[1] if buf else gray1
         faces = detect_faces_frame(detector, cv2.cvtColor(f1, cv2.COLOR_BGR2RGB), t)
-        mouth = {i: mouth_energy(gray1, gray2, b) for i, b in enumerate(faces)}
+        # ponytail: baseline gerak global sekali per sampel; yang dihitung
+        # sebagai mulut hanya gerak RELATIF terhadap goyangan kamera/kepala
+        baseline = float(np.abs(gray1.astype(np.int16) - gray2.astype(np.int16)).mean())
+        mouth = {i: mouth_energy(gray1, gray2, b, baseline) for i, b in enumerate(faces)}
         speaking = True
         if wav is not None:
             speaking = window_rms(wav[0], wav[1], t, t + interval) > settings.SPEAKER_SILENCE_RMS

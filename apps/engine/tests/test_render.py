@@ -1,5 +1,5 @@
 from app.services.render_service import build_render_plan, render_plan_to_ffmpeg_args
-from app.domain.crop import build_crop_expr, clamp_center, crop_window
+from app.domain.crop import build_crop_expr, clamp_center, crop_window, _is_switch
 import re
 
 
@@ -47,7 +47,12 @@ def _eval_x_expr(expr: str, t: float) -> float:
 
 
 def _preview_x(kfs, t, src_w=1920, src_h=1080):
-    """Mirror interpolateKeyframes() + clamp frontend (half-open + cut)."""
+    """Mirror interpolateKeyframes() + clamp frontend (half-open + cut).
+
+    ponytail: aturan CUT pakai _is_switch backend LANGSUNG, bukan duplikat.
+    Duplikat sebelumnya basi (tak kenal aturan 'speaker None = cut' dan
+    'dx > 0.08 = cut') -> test dan backend beda pendapat soal glide vs cut.
+    """
     sk = sorted(kfs, key=lambda k: k["time"])
     if t < sk[0]["time"]:
         cx = sk[0]["center_x"]
@@ -57,7 +62,7 @@ def _preview_x(kfs, t, src_w=1920, src_h=1080):
         for i in range(1, len(sk)):
             if t < sk[i]["time"]:
                 p, c = sk[i - 1], sk[i]
-                if p.get("speaker") and c.get("speaker") and p["speaker"] != c["speaker"]:
+                if _is_switch(p, c):
                     cx = p["center_x"]
                 else:
                     f = (t - p["time"]) / max(c["time"] - p["time"], 0.001)
@@ -70,13 +75,15 @@ def _preview_x(kfs, t, src_w=1920, src_h=1080):
 
 def test_crop_expr_matches_preview():
     # ponytail: guard utama preview == export; regresi bug `+` di luar between()
+    # satu speaker + langkah kecil (dx <= 0.08) = glide, menguji paritas lerp
     kfs = [
-        {"time": 3.0, "center_x": 0.42, "center_y": 0.5},
-        {"time": 5.5, "center_x": 0.60, "center_y": 0.5},
-        {"time": 9.0, "center_x": 0.51, "center_y": 0.5},
+        {"time": 3.0, "center_x": 0.42, "center_y": 0.5, "speaker": "A"},
+        {"time": 5.5, "center_x": 0.48, "center_y": 0.5, "speaker": "A"},
+        {"time": 9.0, "center_x": 0.51, "center_y": 0.5, "speaker": "A"},
     ]
     expr = build_crop_expr(kfs, 1920, 1080, 9, 16)
-    rel = [{"time": k["time"] - 3.0, "center_x": k["center_x"], "center_y": k["center_y"]} for k in kfs]
+    rel = [{"time": k["time"] - 3.0, "center_x": k["center_x"], "center_y": k["center_y"],
+            "speaker": k.get("speaker")} for k in kfs]
     expr_rel = build_crop_expr(rel, 1920, 1080, 9, 16)
     t = 0.0
     while t <= 6.01:

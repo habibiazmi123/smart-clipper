@@ -115,10 +115,17 @@ def render_clip_with_progress(plan: dict, output_path: str,
     args = render_plan_to_ffmpeg_args(plan)
     args.extend(["-progress", "pipe:1", "-nostats", output_path])
     duration = max(plan["trim"]["end"] - plan["trim"]["start"], 0.01)
+    # ponytail: stderr digabung ke stdout agar tak deadlock; sebelumnya
+    # stderr=PIPE tak pernah dibaca selama loop progress -> saat input
+    # corrupt (banjir "mmco: unref short failure") pipe penuh, ffmpeg
+    # terblokir nulis stderr, progress stall, hasil export kepotong.
+    from collections import deque
+    tail = deque(maxlen=30)
     proc = subprocess.Popen(args, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True)
+                            stderr=subprocess.STDOUT, text=True, bufsize=1)
     try:
         for line in proc.stdout:
+            tail.append(line.strip())
             if should_cancel and should_cancel():
                 proc.terminate()
                 try:
@@ -140,9 +147,9 @@ def render_clip_with_progress(plan: dict, output_path: str,
             elif line == "progress=end" and on_progress:
                 log.info("[export] done took=%.1fs -> %s", time.time() - t0, output_path)
                 on_progress(1.0)
-        _, stderr = proc.communicate()
+        proc.wait()
         if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg render failed: {(stderr or '')[-500:]}")
+            raise RuntimeError(f"ffmpeg render failed: {' | '.join(tail)[-500:]}")
         log.info("[export] done took=%.1fs -> %s", time.time() - t0, output_path)
     finally:
         if proc.poll() is None:

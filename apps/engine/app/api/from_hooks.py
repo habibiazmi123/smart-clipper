@@ -103,24 +103,21 @@ def create_clips_for_hooks(conn, pid: str, hook_ids: list[str], aspect_ratio: st
                         result.append({**s, "cx": smoothed[i]["cx"]})
                 return result
 
-            def _dedup_by_cx_and_speaker(kfs):
-                if not kfs:
-                    return kfs
-                out = [kfs[0]]
-                for k in kfs[1:]:
-                    if k.get("speaker") == out[-1].get("speaker") and abs(k["cx"] - out[-1]["cx"]) < 0.02:
-                        continue
-                    out.append(k)
-                return out
-
-            from app.services.vision_service import smooth_centers, interpolate_centers
+            from app.services.vision_service import smooth_centers, adaptive_keyframes
             if centers:
                 smoothed = _smooth_by_speaker(centers)
+                # ponytail: keyframe adaptif per segmen speaker (bukan grid
+                # 0.5s + dedup): gerak cepat = titik rapat ngikutin wajah,
+                # diam = titik jarang; satu orang = glide halus antar titik.
                 keyframes = []
-                for kf in interpolate_centers(smoothed):
-                    near = min(centers, key=lambda c: abs(c["time"] - kf["time"]))
-                    keyframes.append({**kf, "speaker": near.get("speaker"), "sconf": near.get("sconf")})
-                keyframes = _dedup_by_cx_and_speaker(keyframes)
+                seg = [smoothed[0]]
+                for c in smoothed[1:]:
+                    if c.get("speaker") == seg[-1].get("speaker"):
+                        seg.append(c)
+                    else:
+                        keyframes.extend(adaptive_keyframes(seg))
+                        seg = [c]
+                keyframes.extend(adaptive_keyframes(seg))
                 if keyframes and keyframes[0]["time"] > hs:
                     first = keyframes[0]
                     keyframes.insert(0, {"time": round(hs, 3), "cx": first["cx"],

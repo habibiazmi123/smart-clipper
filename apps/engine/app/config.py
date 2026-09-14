@@ -51,6 +51,8 @@ class Settings:
     SMOOTHING_DEADZONE: float = 0.005
     KEYFRAME_INTERVAL: float = 0.5
     FACE_SAMPLE_INTERVAL: float = 0.1  # every ~3rd frame at 30fps
+    ADAPTIVE_EMIT_DX: float = 0.012  # gerak >= ini (~23px @1080p) = keyframe baru
+    ADAPTIVE_MAX_GAP: float = 1.0  # jarang-diam pun max tiap 1 detik ada titik
     # active speaker v1 (PRD): hysteresis agar tanggapan singkat tidak switch
     SPEAKER_SWITCH_MARGIN: float = 0.15
     SPEAKER_MIN_DWELL_SEC: float = 1.5  # challenger unggul selama ini baru switch

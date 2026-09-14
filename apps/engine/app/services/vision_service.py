@@ -39,6 +39,30 @@ def interpolate_centers(centers: list[dict], interval: float = None) -> list[dic
     return result
 
 
+def adaptive_keyframes(seg: list[dict], emit_dx: float = None, max_gap: float = None) -> list[dict]:
+    """Keyframes adaptif per segmen speaker (sudah di-smooth + satu orang):
+    rapat saat gerak cepat (dx >= emit_dx), jarang saat diam (max_gap
+    sebagai batas). Antar titik = glide halus, karena satu orang.
+    Ganti grid tetap interpolate_centers yang memotong tikungan gerak cepat."""
+    emit_dx = emit_dx if emit_dx is not None else settings.ADAPTIVE_EMIT_DX
+    max_gap = max_gap if max_gap is not None else settings.ADAPTIVE_MAX_GAP
+    if not seg:
+        return []
+    def _kf(s):
+        return {"time": round(s["time"], 2), "cx": round(s["cx"], 4),
+                "cy": round(s.get("cy", 0.5), 4),
+                "speaker": s.get("speaker"), "sconf": s.get("sconf")}
+    if len(seg) == 1:
+        return [_kf(seg[0])]
+    out = [seg[0]]
+    for s in seg[1:]:
+        if abs(s["cx"] - out[-1]["cx"]) >= emit_dx or s["time"] - out[-1]["time"] >= max_gap:
+            out.append(s)
+    if out[-1] is not seg[-1]:
+        out.append(seg[-1])
+    return [_kf(s) for s in out]
+
+
 def _lerp_keyframes(centers, t, key):
     if t <= centers[0]["time"]:
         return centers[0][key]
